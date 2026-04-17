@@ -15,6 +15,15 @@ This file is the primary project charter for `Coordex`.
 
 Coordex exists to support a visible, inspectable workflow instead of opaque project-level subthreads.
 
+Origin rationale:
+
+- Hidden project-level subthreads were too black-box for the operator.
+- Long-running or log-heavy worker activity could wedge and leave the supervisor waiting on unclear internal state.
+- The operator wanted durable, human-readable coordination history across role conversations instead of fragmented or hidden context.
+- Manual switching between visible chats was accepted as a deliberate tradeoff for stability, traceability, and operator control.
+- Role collaboration should be readable as named conversations, not only as internal agent orchestration.
+- Coordex exists to make that workflow practical on top of Codex, not to replace Codex itself.
+
 The intended operator experience is:
 
 - bind one or more local filesystem roots as Coordex projects

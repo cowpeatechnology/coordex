@@ -14,6 +14,17 @@ This first version is intentionally narrow:
 
 It exists to support visible, role-oriented coordination for local Codex workspaces without relying on opaque project-level subthreads.
 
+## Why Coordex exists
+
+Coordex was started to address a few practical workflow problems:
+
+- hidden project-level subthreads felt too opaque for the operator
+- long-running or log-heavy internal worker flows could stall in ways that were hard to inspect
+- role collaboration needed a durable, readable conversation surface instead of scattered hidden context
+- manually switching between visible chats was considered an acceptable tradeoff for control, stability, and traceability
+
+In short: Coordex is meant to make Codex coordination more inspectable and operator-driven, not more magical.
+
 Important distinction:
 
 - a Coordex `project` is currently local metadata bound to a filesystem root
