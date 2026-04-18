@@ -38,9 +38,23 @@ type LiveThreadState = {
 
 const DEFAULT_THREAD_START = {
   approvalPolicy: "never",
-  sandbox: "workspace-write",
+  sandbox: "danger-full-access",
   experimentalRawEvents: false
 } as const;
+
+const DEFAULT_THREAD_RESUME = {
+  approvalPolicy: "never",
+  sandbox: "danger-full-access"
+} as const;
+
+const DEFAULT_TURN_START = {
+  approvalPolicy: "never",
+  sandboxPolicy: {
+    type: "dangerFullAccess"
+  }
+} as const;
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 export class CodexAppServerClient extends EventEmitter {
   private process: ChildProcessWithoutNullStreams | null = null;
@@ -164,10 +178,24 @@ export class CodexAppServerClient extends EventEmitter {
     };
   }
 
+  async archiveThread(threadId: string): Promise<void> {
+    await this.request("thread/archive", {
+      threadId
+    });
+  }
+
+  async interruptTurn(threadId: string, turnId: string): Promise<void> {
+    await this.request("turn/interrupt", {
+      threadId,
+      turnId
+    });
+  }
+
   async sendMessage(threadId: string, cwd: string, text: string): Promise<{ turnId: string }> {
     await this.resumeThread(threadId, cwd);
 
     const response = (await this.request("turn/start", {
+      ...DEFAULT_TURN_START,
       threadId,
       cwd,
       input: [
@@ -184,6 +212,32 @@ export class CodexAppServerClient extends EventEmitter {
     return { turnId: response.turn.id };
   }
 
+  async waitForTurnCompletion(
+    threadId: string,
+    turnId: string,
+    options?: {
+      timeoutMs?: number;
+      pollIntervalMs?: number;
+    }
+  ): Promise<CodexThread> {
+    const timeoutMs = options?.timeoutMs ?? 120_000;
+    const pollIntervalMs = options?.pollIntervalMs ?? 1_000;
+    const deadline = Date.now() + timeoutMs;
+
+    while (Date.now() < deadline) {
+      const thread = await this.readThread(threadId);
+      const turn = thread.turns.find((entry) => entry.id === turnId);
+
+      if (turn && turn.status !== "inProgress") {
+        return thread;
+      }
+
+      await sleep(pollIntervalMs);
+    }
+
+    throw new Error(`Timed out waiting for turn ${turnId} to complete.`);
+  }
+
   getLiveState(threadId: string): LiveThreadState {
     return this.liveThreadState.get(threadId) ?? {
       runningTurnId: null,
@@ -197,6 +251,7 @@ export class CodexAppServerClient extends EventEmitter {
     }
 
     await this.request("thread/resume", {
+      ...DEFAULT_THREAD_RESUME,
       threadId,
       cwd
     });

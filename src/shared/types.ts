@@ -1,6 +1,7 @@
 export type AuthStatus = "authenticated" | "unauthenticated" | "unknown";
 export type ChatSource = "coordex" | "imported";
 export type CoordexChatKind = "chat" | "agent";
+export type CoordexChatLaunchState = "pending" | "active";
 
 export type CoordexProject = {
   id: string;
@@ -18,6 +19,7 @@ export type CoordexChat = {
   title: string;
   source: ChatSource;
   kind: CoordexChatKind;
+  launchState: CoordexChatLaunchState;
   cwd: string;
   roleName: string | null;
   roleDirectory: string | null;
@@ -27,7 +29,7 @@ export type CoordexChat = {
 };
 
 export type CoordexState = {
-  version: 2;
+  version: 3;
   projects: CoordexProject[];
   chats: CoordexChat[];
   selection: {
@@ -101,6 +103,56 @@ export type ProjectBundle = {
   chats: CoordexChat[];
 };
 
+export type CoordexPlanCoordinationKind = "dispatch" | "question" | "blocker" | "handoff" | "result" | "decision";
+export type CoordexPlanCoordinationStatus = "open" | "answered" | "blocked" | "done";
+export type CoordexPlanFeatureRunState = "idle" | "running" | "blocked";
+
+export type CoordexPlanCoordination = {
+  id: string;
+  fromRole: string;
+  toRole: string;
+  kind: CoordexPlanCoordinationKind;
+  summary: string;
+  input: string;
+  expectedOutput: string;
+  output: string;
+  status: CoordexPlanCoordinationStatus;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CoordexPlanFeature = {
+  id: string;
+  title: string;
+  description: string;
+  ownerRole: string;
+  done: boolean;
+  runState: CoordexPlanFeatureRunState;
+  coordinations: CoordexPlanCoordination[];
+  updatedAt: string;
+};
+
+export type CoordexPlan = {
+  id: string;
+  goal: string;
+  features: CoordexPlanFeature[];
+  createdAt: string;
+  updatedAt: string;
+  archivedAt: string | null;
+};
+
+export type CoordexProjectBoard = {
+  version: 4;
+  activePlan: CoordexPlan;
+  history: CoordexPlan[];
+};
+
+export type FeatureExecutionResponse = {
+  board: CoordexProjectBoard;
+  chat: CoordexChat;
+  turnId: string;
+};
+
 export type ChatDetail = {
   project: CoordexProject;
   chat: CoordexChat;
@@ -122,5 +174,6 @@ export type BootstrapPayload = {
 
 export type CoordexEvent =
   | { type: "auth.summary"; payload: AuthSummary }
+  | { type: "project.board"; payload: { projectId: string; board: CoordexProjectBoard } }
   | { type: "state.selection"; payload: { projectId: string | null; chatId: string | null } }
   | { type: "codex.notification"; payload: { method: string; params: Record<string, unknown> } };

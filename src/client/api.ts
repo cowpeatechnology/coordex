@@ -1,4 +1,12 @@
-import type { BootstrapPayload, ChatDetail, CoordexProject, CoordexChat, ProjectBundle } from "../shared/types";
+import type {
+  BootstrapPayload,
+  ChatDetail,
+  CoordexProject,
+  CoordexChat,
+  CoordexProjectBoard,
+  FeatureExecutionResponse,
+  ProjectBundle
+} from "../shared/types";
 
 const jsonHeaders = {
   "Content-Type": "application/json"
@@ -24,8 +32,40 @@ export const api = {
       body: JSON.stringify(input)
     }).then(unwrap);
   },
+  updateProject(projectId: string, input: { name: string; rootPath: string }): Promise<ProjectBundle> {
+    return fetch(`/api/projects/${projectId}`, {
+      method: "PATCH",
+      headers: jsonHeaders,
+      body: JSON.stringify(input)
+    }).then(unwrap);
+  },
+  deleteProject(projectId: string): Promise<void> {
+    return fetch(`/api/projects/${projectId}`, {
+      method: "DELETE"
+    }).then(async (response) => {
+      if (!response.ok) {
+        await unwrap(response);
+      }
+    });
+  },
   getProject(projectId: string): Promise<ProjectBundle> {
     return fetch(`/api/projects/${projectId}`).then(unwrap);
+  },
+  getProjectBoard(projectId: string): Promise<CoordexProjectBoard> {
+    return fetch(`/api/projects/${projectId}/board`).then(unwrap);
+  },
+  saveProjectBoard(projectId: string, board: CoordexProjectBoard): Promise<CoordexProjectBoard> {
+    return fetch(`/api/projects/${projectId}/board`, {
+      method: "PUT",
+      headers: jsonHeaders,
+      body: JSON.stringify(board)
+    }).then(unwrap);
+  },
+  archiveProjectBoard(projectId: string): Promise<CoordexProjectBoard> {
+    return fetch(`/api/projects/${projectId}/board/archive`, {
+      method: "POST",
+      headers: jsonHeaders
+    }).then(unwrap);
   },
   createChat(projectId: string, input: { title: string }): Promise<ChatDetail> {
     return fetch(`/api/projects/${projectId}/chats`, {
@@ -36,7 +76,7 @@ export const api = {
   },
   createAgent(
     projectId: string,
-    input: { projectTemplateKey?: string; templateKey?: string; roleName?: string }
+    input: { projectTemplateKey?: string; templateKey?: string; roleName?: string; rolePurpose?: string }
   ): Promise<ChatDetail> {
     return fetch(`/api/projects/${projectId}/agents`, {
       method: "POST",
@@ -46,6 +86,12 @@ export const api = {
   },
   getChat(chatId: string): Promise<ChatDetail> {
     return fetch(`/api/chats/${chatId}`).then(unwrap);
+  },
+  executeFeature(projectId: string, featureId: string): Promise<FeatureExecutionResponse> {
+    return fetch(`/api/projects/${projectId}/features/${featureId}/execute`, {
+      method: "POST",
+      headers: jsonHeaders
+    }).then(unwrap);
   },
   sendMessage(chatId: string, input: { text: string }): Promise<{ turnId: string }> {
     return fetch(`/api/chats/${chatId}/messages`, {
@@ -69,4 +115,12 @@ export const api = {
   }
 };
 
-export type { BootstrapPayload, ChatDetail, CoordexProject, CoordexChat, ProjectBundle };
+export type {
+  BootstrapPayload,
+  ChatDetail,
+  CoordexProject,
+  CoordexChat,
+  CoordexProjectBoard,
+  FeatureExecutionResponse,
+  ProjectBundle
+};

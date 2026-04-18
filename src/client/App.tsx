@@ -1,7 +1,17 @@
-import { FormEvent, MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from "react";
+import { CSSProperties, FormEvent, MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from "react";
 
 import { AGENT_PROJECT_TEMPLATES } from "../shared/agents";
-import type { AuthSummary, ChatDetail, CoordexChat, CoordexEvent, CoordexProject, ProjectBundle } from "../shared/types";
+import type {
+  AuthSummary,
+  ChatDetail,
+  CoordexChat,
+  CoordexPlanCoordination,
+  CoordexEvent,
+  CoordexPlanFeature,
+  CoordexProject,
+  CoordexProjectBoard,
+  ProjectBundle
+} from "../shared/types";
 import { api } from "./api";
 
 type Notice = {
@@ -10,6 +20,17 @@ type Notice = {
 };
 
 type SidebarComposerMode = "chat" | "agent" | null;
+type AgentSetupTab = "template" | "custom";
+type ProjectLoadOptions = {
+  includeBoard?: boolean;
+};
+
+type BoardDialogState =
+  | { kind: "goal" }
+  | { kind: "feature"; featureId: string }
+  | { kind: "coordination"; featureId: string }
+  | { kind: "history" }
+  | null;
 
 const DEFAULT_SIDEBAR_WIDTH = 340;
 const MIN_SIDEBAR_WIDTH = 280;
@@ -30,23 +51,37 @@ function formatTime(value: string | number | null | undefined): string {
   }).format(date);
 }
 
-function describeChatScope(chat: CoordexChat, project: CoordexProject): string {
-  const normalizedRoot = project.rootPath.replace(/\\/g, "/");
-  const normalizedCwd = chat.cwd.replace(/\\/g, "/");
-
-  if (chat.kind === "agent") {
-    return chat.roleDirectory ? `${chat.roleDirectory}/` : normalizedCwd;
+function describeChatResponsibility(chat: CoordexChat): string {
+  if (chat.kind !== "agent") {
+    return "General project discussion and shared workspace context.";
   }
 
-  if (normalizedCwd === normalizedRoot) {
-    return "root";
+  const roleName = normalizeRoleName(chat.roleName);
+
+  for (const template of AGENT_PROJECT_TEMPLATES) {
+    const role = template.roles.find((candidate) => normalizeRoleName(candidate.label) === roleName);
+    if (role) {
+      return role.description;
+    }
   }
 
-  if (normalizedCwd.startsWith(`${normalizedRoot}/`)) {
-    return normalizedCwd.slice(normalizedRoot.length + 1);
+  return chat.roleName ? `${chat.roleName} role-specific conversation.` : "Role-specific conversation.";
+}
+
+function isPendingAgent(chat: CoordexChat | null | undefined): boolean {
+  return chat?.kind === "agent" && chat.launchState === "pending";
+}
+
+function getAgentVisibilityNote(chat: CoordexChat | null | undefined): string | null {
+  if (chat?.kind !== "agent") {
+    return null;
   }
 
-  return normalizedCwd;
+  if (chat.launchState === "pending") {
+    return "This agent exists, but it has no turns yet. Send the first message to activate it. Even after activation, the official Codex project view may still omit role threads started under Agents/<role>/.";
+  }
+
+  return "This role thread is active in Coordex, but the official Codex project view may still omit role threads started under Agents/<role>/ because they are subdirectory conversations rather than root-level project chats.";
 }
 
 function renderItem(item: ChatDetail["thread"]["turns"][number]["items"][number]) {
@@ -153,23 +188,259 @@ function timelineLength(detail: ChatDetail | null): number {
   return detail.thread.turns.reduce((count, turn) => count + turn.items.length, 0);
 }
 
+function normalizeRoleName(value: string | null | undefined): string {
+  return (value ?? "").trim().toLowerCase();
+}
+
+function truncateText(value: string, maxLength: number): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  if (trimmed.length <= maxLength) {
+    return trimmed;
+  }
+
+  return `${trimmed.slice(0, maxLength).trimEnd()}…`;
+}
+
+function describeFeatureState(feature: CoordexPlanFeature): string {
+  if (feature.done) {
+    return "Completed";
+  }
+
+  if (feature.runState === "running") {
+    return "Running";
+  }
+
+  if (feature.runState === "blocked") {
+    return "Blocked";
+  }
+
+  return "Open";
+}
+
+function buildFeatureSummary(feature: CoordexPlanFeature): string {
+  const title = feature.title.trim() || "Untitled subfunction";
+  const description = feature.description.trim();
+  const ownerRole = feature.ownerRole.trim();
+  const summaryParts = [title];
+
+  if (description && description !== title) {
+    summaryParts.push(description);
+  }
+
+  if (ownerRole) {
+    summaryParts.push(ownerRole);
+  }
+
+  return summaryParts.join(" · ");
+}
+
+function getCoordinationLabel(coordination: CoordexPlanCoordination): string {
+  const fromRole = coordination.fromRole.trim() || "unknown";
+  const toRole = coordination.toRole.trim() || "unknown";
+  return `${fromRole} ↔ ${toRole}`;
+}
+
+function formatCoordinationKind(value: CoordexPlanCoordination["kind"]): string {
+  switch (value) {
+    case "dispatch":
+      return "dispatch";
+    case "question":
+      return "question";
+    case "blocker":
+      return "blocker";
+    case "handoff":
+      return "handoff";
+    case "result":
+      return "result";
+    case "decision":
+      return "decision";
+  }
+}
+
+function formatCoordinationStatus(value: CoordexPlanCoordination["status"]): string {
+  switch (value) {
+    case "open":
+      return "open";
+    case "answered":
+      return "answered";
+    case "blocked":
+      return "blocked";
+    case "done":
+      return "done";
+  }
+}
+
+function renderFeaturePreviewCard(feature: CoordexPlanFeature) {
+  return (
+    <div className="board-hover-card" role="presentation">
+      <strong>{feature.title || "Untitled subfunction"}</strong>
+      <div className="board-hover-pills">
+        <span className={`pill ${feature.done ? "pill-kind-chat" : "pill-kind-agent"}`}>{describeFeatureState(feature).toLowerCase()}</span>
+        <span className="pill pill-kind-chat">{feature.ownerRole || "unassigned"}</span>
+      </div>
+      <p>{feature.description || "No detailed description recorded for this subfunction."}</p>
+    </div>
+  );
+}
+
+function renderCoordinationPreviewCard(feature: CoordexPlanFeature) {
+  const previewItems = feature.coordinations.slice(0, 3);
+
+  return (
+    <div className="board-hover-card board-hover-card-wide" role="presentation">
+      <strong>Coordination</strong>
+      {previewItems.length ? (
+        <div className="board-hover-list">
+          {previewItems.map((coordination) => (
+            <div key={coordination.id} className="board-hover-entry">
+              <div className="board-hover-pills">
+                <span className="pill pill-kind-chat">{getCoordinationLabel(coordination)}</span>
+                <span className="pill pill-kind-agent">{formatCoordinationKind(coordination.kind)}</span>
+                <span className="pill pill-kind-chat">{formatCoordinationStatus(coordination.status)}</span>
+              </div>
+              <p>{coordination.summary || coordination.input || "No structured coordination summary recorded."}</p>
+            </div>
+          ))}
+          {feature.coordinations.length > previewItems.length ? (
+            <span className="muted">+{feature.coordinations.length - previewItems.length} more record(s)</span>
+          ) : null}
+        </div>
+      ) : (
+        <p>No structured coordination record has been saved for this subfunction yet.</p>
+      )}
+    </div>
+  );
+}
+
+function renderGoalPreviewCard(goal: string) {
+  return (
+    <div className="board-hover-card board-hover-card-wide" role="presentation">
+      <strong>Current Goal</strong>
+      <p>{goal || "No goal recorded yet."}</p>
+    </div>
+  );
+}
+
+function IconPlus() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <path d="M10 4v12M4 10h12" />
+    </svg>
+  );
+}
+
+function IconRefresh() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <path d="M15.5 8A6 6 0 1 0 16 12" />
+      <path d="M12.5 4.5h3v3" />
+    </svg>
+  );
+}
+
+function IconEdit() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <path d="M4 14.5V16h1.5L14.2 7.3l-1.5-1.5L4 14.5Z" />
+      <path d="M11.8 4.2 13.3 2.7 15.8 5.2 14.3 6.7" />
+    </svg>
+  );
+}
+
+function IconChat() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <path d="M4 5.5h12v7H8l-4 3v-10Z" />
+    </svg>
+  );
+}
+
+function IconHistory() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <path d="M4.5 10a5.5 5.5 0 1 0 1.4-3.7" />
+      <path d="M4.5 5.5v2.8h2.8" />
+      <path d="M10 7.3v3l2 1.3" />
+    </svg>
+  );
+}
+
+function IconEllipsis() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <circle cx="5" cy="10" r="1.4" />
+      <circle cx="10" cy="10" r="1.4" />
+      <circle cx="15" cy="10" r="1.4" />
+    </svg>
+  );
+}
+
+function IconAgent() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <circle cx="10" cy="6.2" r="2.3" />
+      <path d="M5.5 15.8c.8-2.3 2.4-3.5 4.5-3.5s3.7 1.2 4.5 3.5" />
+      <path d="M3.5 9.5h1.7M14.8 9.5h1.7" />
+    </svg>
+  );
+}
+
+function IconRemove() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <path d="M5 6.2h10" />
+      <path d="M7.2 6.2V15h5.6V6.2" />
+      <path d="M8.2 6.2V4.5h3.6v1.7" />
+    </svg>
+  );
+}
+
+function IconLaunch() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <path d="M6 4.5 15.2 10 6 15.5V4.5Z" />
+    </svg>
+  );
+}
+
+function IconCheckCircle() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <circle cx="10" cy="10" r="6.8" />
+      <path d="m7.3 10.2 1.8 1.8 3.8-4.2" />
+    </svg>
+  );
+}
+
 export function App() {
   const [auth, setAuth] = useState<AuthSummary | null>(null);
   const [projects, setProjects] = useState<CoordexProject[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [projectBundle, setProjectBundle] = useState<ProjectBundle | null>(null);
+  const [projectBoard, setProjectBoard] = useState<CoordexProjectBoard | null>(null);
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [chatDetail, setChatDetail] = useState<ChatDetail | null>(null);
+  const [runningTurnId, setRunningTurnId] = useState<string | null>(null);
   const [draftAssistantText, setDraftAssistantText] = useState("");
   const [messageText, setMessageText] = useState("");
   const [projectName, setProjectName] = useState("");
   const [projectRootPath, setProjectRootPath] = useState("");
   const [chatTitle, setChatTitle] = useState("");
   const [customRoleName, setCustomRoleName] = useState("");
+  const [customRolePurpose, setCustomRolePurpose] = useState("");
+  const [selectedTemplateRoleKeys, setSelectedTemplateRoleKeys] = useState<string[]>([]);
   const [projectFormOpen, setProjectFormOpen] = useState(false);
+  const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [sidebarComposerMode, setSidebarComposerMode] = useState<SidebarComposerMode>(null);
+  const [agentSetupTab, setAgentSetupTab] = useState<AgentSetupTab>("template");
   const [agentProjectTemplateKey, setAgentProjectTemplateKey] = useState(AGENT_PROJECT_TEMPLATES[0]?.key ?? "");
   const [sidebarWidth, setSidebarWidth] = useState(getInitialSidebarWidth);
+  const [boardDirty, setBoardDirty] = useState(false);
+  const [boardDialog, setBoardDialog] = useState<BoardDialogState>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [busy, setBusy] = useState({
     boot: true,
@@ -177,22 +448,51 @@ export function App() {
     chat: false,
     agent: false,
     send: false,
-    login: false
+    login: false,
+    board: false,
+    archive: false
   });
 
   const appShellRef = useRef<HTMLElement | null>(null);
   const isResizingRef = useRef(false);
   const threadScrollRef = useRef<HTMLDivElement | null>(null);
+  const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const liveRefreshInFlightRef = useRef(false);
 
   const selectedProject = useMemo(() => {
     return projects.find((project) => project.id === selectedProjectId) ?? null;
   }, [projects, selectedProjectId]);
+  const isEditingProject = editingProjectId !== null;
 
   const selectedAgentProjectTemplate = useMemo(() => {
     return AGENT_PROJECT_TEMPLATES.find((template) => template.key === agentProjectTemplateKey) ?? AGENT_PROJECT_TEMPLATES[0] ?? null;
   }, [agentProjectTemplateKey]);
 
   const chats = projectBundle?.chats ?? [];
+  const activePlan = projectBoard?.activePlan ?? null;
+  const existingAgentRoleNames = useMemo(() => {
+    return new Set(
+      chats
+        .filter((chat) => chat.kind === "agent")
+        .map((chat) => normalizeRoleName(chat.roleName))
+        .filter(Boolean)
+    );
+  }, [chats]);
+  const templateRoleRows = useMemo(() => {
+    return (
+      selectedAgentProjectTemplate?.roles.map((role) => ({
+        ...role,
+        exists: existingAgentRoleNames.has(normalizeRoleName(role.label))
+      })) ?? []
+    );
+  }, [existingAgentRoleNames, selectedAgentProjectTemplate]);
+  const activeBoardDialogFeature = useMemo(() => {
+    if (!activePlan || !boardDialog || boardDialog.kind === "goal" || boardDialog.kind === "history") {
+      return null;
+    }
+
+    return activePlan.features.find((feature) => feature.id === boardDialog.featureId) ?? null;
+  }, [activePlan, boardDialog]);
 
   const refreshBootstrap = async () => {
     const payload = await api.bootstrap();
@@ -203,15 +503,71 @@ export function App() {
     return payload;
   };
 
-  const loadProject = async (projectId: string, syncSelection = true) => {
+  const applyChatDetail = (detail: ChatDetail) => {
+    setChatDetail(detail);
+    setSelectedProjectId(detail.project.id);
+    setSelectedChatId(detail.chat.id);
+    setDraftAssistantText(detail.liveState.draftAssistantText);
+    setRunningTurnId(detail.liveState.runningTurnId);
+  };
+
+  const closeProjectForm = () => {
+    setProjectFormOpen(false);
+    setEditingProjectId(null);
+    setProjectName("");
+    setProjectRootPath("");
+  };
+
+  const closeSidebarComposer = () => {
+    setSidebarComposerMode(null);
+    setAgentSetupTab("template");
+    setChatTitle("");
+    setCustomRoleName("");
+    setCustomRolePurpose("");
+    setSelectedTemplateRoleKeys([]);
+  };
+
+  const openProjectCreateForm = () => {
+    closeSidebarComposer();
+    setEditingProjectId(null);
+    setProjectName("");
+    setProjectRootPath("");
+    setProjectFormOpen(true);
+    setNotice(null);
+  };
+
+  const openProjectEditForm = () => {
+    if (!selectedProject) {
+      return;
+    }
+
+    closeSidebarComposer();
+    setEditingProjectId(selectedProject.id);
+    setProjectName(selectedProject.name);
+    setProjectRootPath(selectedProject.rootPath);
+    setProjectFormOpen(true);
+    setNotice(null);
+  };
+
+  const loadProject = async (projectId: string, syncSelection = true, options?: ProjectLoadOptions) => {
+    const includeBoard = options?.includeBoard ?? true;
+
     setBusy((current) => ({ ...current, project: true }));
     try {
       if (syncSelection) {
         await api.setSelection({ projectId, chatId: null });
       }
 
-      const bundle = await api.getProject(projectId);
+      const [bundle, board] = await Promise.all([
+        api.getProject(projectId),
+        includeBoard ? api.getProjectBoard(projectId) : Promise.resolve(null)
+      ]);
+
       setProjectBundle(bundle);
+      if (board) {
+        setProjectBoard(board);
+        setBoardDirty(false);
+      }
       setSelectedProjectId(projectId);
       setProjects((current) =>
         current
@@ -219,7 +575,8 @@ export function App() {
           .sort((a, b) => b.lastOpenedAt.localeCompare(a.lastOpenedAt))
       );
       setNotice(null);
-      return bundle;
+
+      return { bundle, board };
     } catch (error) {
       setNotice({
         tone: "error",
@@ -239,10 +596,7 @@ export function App() {
       }
 
       const detail = await api.getChat(chatId);
-      setChatDetail(detail);
-      setSelectedProjectId(projectId);
-      setSelectedChatId(chatId);
-      setDraftAssistantText(detail.liveState.draftAssistantText);
+      applyChatDetail(detail);
       setNotice(null);
       return detail;
     } catch (error) {
@@ -256,8 +610,14 @@ export function App() {
     }
   };
 
-  const openProject = async (projectId: string, syncSelection = true) => {
-    const bundle = await loadProject(projectId, syncSelection);
+  const openProject = async (projectId: string, syncSelection = true, preferredChatId: string | null = null) => {
+    const { bundle } = await loadProject(projectId, syncSelection, { includeBoard: true });
+    const selectedChat = preferredChatId ? bundle.chats.find((chat) => chat.id === preferredChatId) ?? null : null;
+    if (selectedChat) {
+      await loadChat(selectedChat.id, bundle.project.id, false);
+      return;
+    }
+
     if (bundle.chats[0]) {
       await loadChat(bundle.chats[0].id, bundle.project.id, syncSelection);
       return;
@@ -265,6 +625,7 @@ export function App() {
 
     setSelectedChatId(null);
     setChatDetail(null);
+    setRunningTurnId(null);
     setDraftAssistantText("");
     if (syncSelection) {
       await api.setSelection({ projectId, chatId: null });
@@ -277,7 +638,9 @@ export function App() {
         const payload = await refreshBootstrap();
 
         if (!payload.projects.length) {
-          setProjectFormOpen(true);
+          setProjectBoard(null);
+          setRunningTurnId(null);
+          openProjectCreateForm();
           return;
         }
 
@@ -286,9 +649,13 @@ export function App() {
           return;
         }
 
-        const bundle = await loadProject(projectId, false);
-        if (payload.selection.chatId) {
-          await loadChat(payload.selection.chatId, bundle.project.id, false);
+        const { bundle } = await loadProject(projectId, false, { includeBoard: true });
+        const selectedChat = payload.selection.chatId
+          ? bundle.chats.find((chat) => chat.id === payload.selection.chatId) ?? null
+          : null;
+
+        if (selectedChat) {
+          await loadChat(selectedChat.id, bundle.project.id, false);
         } else if (bundle.chats[0]) {
           await loadChat(bundle.chats[0].id, bundle.project.id, true);
         }
@@ -320,35 +687,127 @@ export function App() {
         return;
       }
 
+      if (payload.type === "project.board") {
+        if (payload.payload.projectId === selectedProjectId) {
+          setProjectBoard(payload.payload.board);
+          setBoardDirty(false);
+        }
+        return;
+      }
+
       const method = payload.payload.method;
       const params = payload.payload.params;
+      const threadId = typeof params.threadId === "string" ? params.threadId : null;
+      const isCurrentThread = Boolean(chatDetail && threadId === chatDetail.chat.threadId);
+      const isSelectedProjectThread = Boolean(threadId && chats.some((chat) => chat.threadId === threadId));
 
-      if (method === "item/agentMessage/delta" && chatDetail && params.threadId === chatDetail.chat.threadId) {
+      if (method === "item/agentMessage/delta" && isCurrentThread) {
         const delta = typeof params.delta === "string" ? params.delta : "";
+        const turnId = typeof params.turnId === "string" ? params.turnId : null;
+        if (turnId) {
+          setRunningTurnId(turnId);
+        }
         setDraftAssistantText((current) => `${current}${delta}`);
         return;
       }
 
-      if (method === "turn/started" && chatDetail && params.threadId === chatDetail.chat.threadId) {
+      if (method === "turn/started" && isCurrentThread) {
+        const turn = params.turn;
+        const turnId =
+          turn && typeof turn === "object" && typeof Reflect.get(turn, "id") === "string"
+            ? (Reflect.get(turn, "id") as string)
+            : null;
+        setRunningTurnId(turnId ?? "running");
         setDraftAssistantText("");
+        void loadChat(chatDetail.chat.id, chatDetail.project.id, false);
         return;
       }
 
-      if (method === "turn/completed" && chatDetail && params.threadId === chatDetail.chat.threadId) {
+      if (method === "turn/started" && isSelectedProjectThread && selectedProjectId) {
+        void loadProject(selectedProjectId, false, { includeBoard: true });
+        return;
+      }
+
+      if (
+        (method === "turn/completed" ||
+          method === "turn/failed" ||
+          method === "turn/cancelled" ||
+          method === "turn/interrupted") &&
+        isCurrentThread
+      ) {
+        setRunningTurnId(null);
         setDraftAssistantText("");
         void loadChat(chatDetail.chat.id, chatDetail.project.id, false);
-        void loadProject(chatDetail.project.id, false);
+        void loadProject(chatDetail.project.id, false, { includeBoard: true });
+        return;
+      }
+
+      if (
+        (method === "turn/completed" ||
+          method === "turn/failed" ||
+          method === "turn/cancelled" ||
+          method === "turn/interrupted") &&
+        isSelectedProjectThread &&
+        selectedProjectId
+      ) {
+        void loadProject(selectedProjectId, false, { includeBoard: true });
       }
     };
 
     source.onerror = () => {
-      source.close();
+      // Let the browser retry the EventSource connection automatically.
     };
 
     return () => {
       source.close();
     };
-  }, [chatDetail]);
+  }, [chatDetail, chats, selectedProjectId]);
+
+  useEffect(() => {
+    if (!chatDetail || !runningTurnId) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const refreshLiveThread = async () => {
+      if (cancelled || liveRefreshInFlightRef.current) {
+        return;
+      }
+
+      liveRefreshInFlightRef.current = true;
+
+      try {
+        const detail = await api.getChat(chatDetail.chat.id);
+        if (cancelled) {
+          return;
+        }
+
+        applyChatDetail(detail);
+
+        if (!detail.liveState.runningTurnId) {
+          const bundle = await api.getProject(chatDetail.project.id).catch(() => null);
+          if (bundle && !cancelled) {
+            setProjectBundle(bundle);
+          }
+        }
+      } catch {
+        // Keep the optimistic live state and retry on the next interval.
+      } finally {
+        liveRefreshInFlightRef.current = false;
+      }
+    };
+
+    void refreshLiveThread();
+    const intervalId = window.setInterval(() => {
+      void refreshLiveThread();
+    }, 1500);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [chatDetail?.chat.id, chatDetail?.project.id, runningTurnId]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -405,21 +864,43 @@ export function App() {
     return () => {
       window.cancelAnimationFrame(frame);
     };
-  }, [selectedChatId, chatDetail?.thread.updatedAt, timelineLength(chatDetail), draftAssistantText]);
+  }, [selectedChatId, chatDetail?.thread.updatedAt, timelineLength(chatDetail), draftAssistantText, runningTurnId]);
 
-  const closeSidebarComposer = () => {
-    setSidebarComposerMode(null);
-    setChatTitle("");
-    setCustomRoleName("");
-  };
+  useEffect(() => {
+    if (sidebarComposerMode !== "agent") {
+      return;
+    }
+
+    setSelectedTemplateRoleKeys(templateRoleRows.filter((role) => !role.exists).map((role) => role.key));
+  }, [sidebarComposerMode, selectedProjectId, templateRoleRows]);
+
+  useEffect(() => {
+    if (!boardDialog || boardDialog.kind === "goal" || boardDialog.kind === "history") {
+      return;
+    }
+
+    if (!activeBoardDialogFeature) {
+      setBoardDialog(null);
+    }
+  }, [activeBoardDialogFeature, boardDialog]);
 
   const openSidebarComposer = async (mode: Exclude<SidebarComposerMode, null>) => {
     if (!selectedProjectId && projects[0]) {
       await openProject(projects[0].id);
     }
 
+    closeProjectForm();
     setSidebarComposerMode(mode);
     setNotice(null);
+  };
+
+  const toggleSidebarComposer = async (mode: Exclude<SidebarComposerMode, null>) => {
+    if (sidebarComposerMode === mode) {
+      closeSidebarComposer();
+      return;
+    }
+
+    await openSidebarComposer(mode);
   };
 
   const handleBeginResize = (event: ReactMouseEvent<HTMLDivElement>) => {
@@ -434,34 +915,112 @@ export function App() {
       return;
     }
 
+    closeProjectForm();
     closeSidebarComposer();
     await openProject(nextProjectId);
   };
 
-  const handleProjectCreate = async (event: FormEvent) => {
+  const handleProjectSubmit = async (event: FormEvent) => {
     event.preventDefault();
     setBusy((current) => ({ ...current, project: true }));
 
     try {
-      const bundle = await api.createProject({
-        name: projectName,
-        rootPath: projectRootPath
+      const bundle = editingProjectId
+        ? await api.updateProject(editingProjectId, {
+            name: projectName,
+            rootPath: projectRootPath
+          })
+        : await api.createProject({
+            name: projectName,
+            rootPath: projectRootPath
+          });
+
+      const [payload, board] = await Promise.all([refreshBootstrap(), api.getProjectBoard(bundle.project.id)]);
+      const selectedChat =
+        payload.selection.projectId === bundle.project.id && payload.selection.chatId
+          ? bundle.chats.find((chat) => chat.id === payload.selection.chatId) ?? null
+          : null;
+
+      setProjectBundle(bundle);
+      setProjectBoard(board);
+      setBoardDirty(false);
+      setSelectedProjectId(bundle.project.id);
+      closeProjectForm();
+      setNotice({
+        tone: "info",
+        message: editingProjectId
+          ? `Updated ${bundle.project.name} to ${bundle.project.rootPath}.`
+          : `Registered ${bundle.project.name} at ${bundle.project.rootPath}.`
       });
 
-      setProjects((current) => [bundle.project, ...current]);
-      setProjectBundle(bundle);
-      setSelectedProjectId(bundle.project.id);
-      setProjectName("");
-      setProjectRootPath("");
-      setProjectFormOpen(false);
-      setNotice(null);
-
-      if (bundle.chats[0]) {
-        await loadChat(bundle.chats[0].id, bundle.project.id);
+      if (selectedChat) {
+        await loadChat(selectedChat.id, bundle.project.id, false);
+      } else if (bundle.chats[0]) {
+        await loadChat(bundle.chats[0].id, bundle.project.id, true);
       } else {
         setSelectedChatId(null);
         setChatDetail(null);
+        setRunningTurnId(null);
+        setDraftAssistantText("");
       }
+    } catch (error) {
+      setNotice({
+        tone: "error",
+        message: error instanceof Error ? error.message : String(error)
+      });
+    } finally {
+      setBusy((current) => ({ ...current, project: false }));
+    }
+  };
+
+  const handleProjectDelete = async () => {
+    if (!selectedProject) {
+      return;
+    }
+
+    const removedProjectName = selectedProject.name;
+    const confirmed = window.confirm(
+      `Remove ${removedProjectName} from Coordex? This only deletes Coordex local metadata and does not delete Codex threads.`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setBusy((current) => ({ ...current, project: true }));
+
+    try {
+      await api.deleteProject(selectedProject.id);
+      closeProjectForm();
+      closeSidebarComposer();
+      const payload = await refreshBootstrap();
+
+      if (!payload.projects.length) {
+        setProjectBundle(null);
+        setProjectBoard(null);
+        setSelectedProjectId(null);
+        setSelectedChatId(null);
+        setChatDetail(null);
+        setRunningTurnId(null);
+        setDraftAssistantText("");
+        openProjectCreateForm();
+        setNotice({
+          tone: "info",
+          message: `Removed ${removedProjectName} from Coordex.`
+        });
+        return;
+      }
+
+      const nextProjectId = payload.selection.projectId ?? payload.projects[0]?.id ?? null;
+      if (!nextProjectId) {
+        return;
+      }
+
+      const preferredChatId = payload.selection.projectId === nextProjectId ? payload.selection.chatId : null;
+      await openProject(nextProjectId, false, preferredChatId);
+      setNotice({
+        tone: "info",
+        message: `Removed ${removedProjectName} from Coordex.`
+      });
     } catch (error) {
       setNotice({
         tone: "error",
@@ -485,12 +1044,10 @@ export function App() {
         title: chatTitle
       });
 
-      const bundle = await loadProject(selectedProjectId, false);
+      const { bundle } = await loadProject(selectedProjectId, false, { includeBoard: false });
       setProjectBundle(bundle);
-      setChatDetail(detail);
-      setSelectedChatId(detail.chat.id);
+      applyChatDetail(detail);
       setChatTitle("");
-      setDraftAssistantText("");
       closeSidebarComposer();
       setNotice(null);
     } catch (error) {
@@ -503,30 +1060,37 @@ export function App() {
     }
   };
 
-  const createAgent = async (input: { projectTemplateKey?: string; templateKey?: string; roleName?: string }) => {
+  const createAgent = async (
+    input: { projectTemplateKey?: string; templateKey?: string; roleName?: string; rolePurpose?: string },
+    options?: { closeComposer?: boolean; notice?: string | null }
+  ): Promise<ChatDetail | null> => {
     if (!selectedProjectId) {
-      return;
+      return null;
     }
 
     setBusy((current) => ({ ...current, agent: true }));
 
     try {
       const detail = await api.createAgent(selectedProjectId, input);
-      const bundle = await loadProject(selectedProjectId, false);
+      const { bundle } = await loadProject(selectedProjectId, false, { includeBoard: false });
       setProjectBundle(bundle);
-      setChatDetail(detail);
-      setSelectedChatId(detail.chat.id);
-      setDraftAssistantText("");
-      closeSidebarComposer();
-      setNotice({
-        tone: "info",
-        message: `Created ${detail.chat.roleName ?? detail.chat.title} in ${detail.chat.cwd}.`
-      });
+      applyChatDetail(detail);
+      if (options?.closeComposer ?? true) {
+        closeSidebarComposer();
+      }
+      if (options?.notice !== null) {
+        setNotice({
+          tone: "info",
+          message: options?.notice ?? `Created and initialized ${detail.chat.roleName ?? detail.chat.title} in ${detail.chat.cwd}.`
+        });
+      }
+      return detail;
     } catch (error) {
       setNotice({
         tone: "error",
         message: error instanceof Error ? error.message : String(error)
       });
+      return null;
     } finally {
       setBusy((current) => ({ ...current, agent: false }));
     }
@@ -538,10 +1102,140 @@ export function App() {
       return;
     }
 
-    await createAgent({
-      projectTemplateKey: selectedAgentProjectTemplate?.key,
-      roleName: customRoleName
+    const detail = await createAgent(
+      {
+        projectTemplateKey: selectedAgentProjectTemplate?.key,
+        roleName: customRoleName,
+        rolePurpose: customRolePurpose
+      },
+      {
+        closeComposer: true,
+        notice: null
+      }
+    );
+
+    if (!detail) {
+      return;
+    }
+
+    setCustomRoleName("");
+    setCustomRolePurpose("");
+    setNotice({
+      tone: "info",
+      message: `Created and initialized custom role ${detail.chat.roleName ?? detail.chat.title}.`
     });
+  };
+
+  const handleTemplateRoleToggle = (roleKey: string) => {
+    setSelectedTemplateRoleKeys((current) =>
+      current.includes(roleKey) ? current.filter((value) => value !== roleKey) : [...current, roleKey]
+    );
+  };
+
+  const handleSelectAllTemplateRoles = () => {
+    setSelectedTemplateRoleKeys(templateRoleRows.filter((role) => !role.exists).map((role) => role.key));
+  };
+
+  const handleClearTemplateRoles = () => {
+    setSelectedTemplateRoleKeys([]);
+  };
+
+  const handleTemplateAgentCreate = async () => {
+    if (!selectedProjectId || !selectedAgentProjectTemplate) {
+      return;
+    }
+
+    const rolesToCreate = templateRoleRows.filter(
+      (role) => selectedTemplateRoleKeys.includes(role.key) && !role.exists
+    );
+
+    if (!rolesToCreate.length) {
+      setNotice({
+        tone: "info",
+        message: "No new template roles are selected."
+      });
+      return;
+    }
+
+    setBusy((current) => ({ ...current, agent: true }));
+
+    try {
+      let lastCreated: ChatDetail | null = null;
+
+      for (const role of rolesToCreate) {
+        lastCreated = await api.createAgent(selectedProjectId, {
+          projectTemplateKey: selectedAgentProjectTemplate.key,
+          templateKey: role.key
+        });
+      }
+
+      const { bundle } = await loadProject(selectedProjectId, false, { includeBoard: false });
+      setProjectBundle(bundle);
+      setDraftAssistantText("");
+      setSelectedTemplateRoleKeys([]);
+      if (lastCreated) {
+        applyChatDetail(lastCreated);
+      }
+      closeSidebarComposer();
+
+      setNotice({
+        tone: "info",
+        message: `Created and initialized ${rolesToCreate.length} role thread${rolesToCreate.length > 1 ? "s" : ""} from ${selectedAgentProjectTemplate.label}.`
+      });
+    } catch (error) {
+      setNotice({
+        tone: "error",
+        message: error instanceof Error ? error.message : String(error)
+      });
+    } finally {
+      setBusy((current) => ({ ...current, agent: false }));
+    }
+  };
+
+  const submitMessageToChat = async (
+    chatId: string,
+    projectId: string,
+    text: string,
+    successMessage = "Message submitted to Codex."
+  ): Promise<ChatDetail | null> => {
+    setBusy((current) => ({ ...current, send: true }));
+
+    try {
+      const turn = await api.sendMessage(chatId, {
+        text
+      });
+      setMessageText("");
+      setRunningTurnId(turn.turnId);
+      setDraftAssistantText("");
+
+      const [detail, bundle] = await Promise.all([
+        api.getChat(chatId).catch(() => null),
+        api.getProject(projectId).catch(() => null)
+      ]);
+
+      if (detail) {
+        applyChatDetail(detail);
+      }
+
+      if (bundle) {
+        setProjectBundle(bundle);
+      }
+
+      setNotice({
+        tone: "info",
+        message: successMessage
+      });
+
+      return detail;
+    } catch (error) {
+      setNotice({
+        tone: "error",
+        message: error instanceof Error ? error.message : String(error)
+      });
+      return null;
+    } finally {
+      setBusy((current) => ({ ...current, send: false }));
+    }
   };
 
   const handleMessageSend = async (event: FormEvent) => {
@@ -550,27 +1244,17 @@ export function App() {
       return;
     }
 
-    setBusy((current) => ({ ...current, send: true }));
-
-    try {
-      await api.sendMessage(chatDetail.chat.id, {
-        text: messageText
-      });
-      setMessageText("");
-      setDraftAssistantText("");
-      setNotice({
-        tone: "info",
-        message: "Message submitted to Codex."
-      });
-    } catch (error) {
-      setNotice({
-        tone: "error",
-        message: error instanceof Error ? error.message : String(error)
-      });
-    } finally {
-      setBusy((current) => ({ ...current, send: false }));
-    }
+    await submitMessageToChat(chatDetail.chat.id, chatDetail.project.id, messageText);
   };
+
+  const isTurnRunning = Boolean(runningTurnId);
+  const composerStatus = chatDetail
+    ? busy.send
+      ? "Submitting message to Codex..."
+      : isTurnRunning
+        ? "Codex is thinking..."
+        : `Last updated ${formatTime(chatDetail.thread.updatedAt)}`
+    : "No thread selected";
 
   const handleLoginStart = async () => {
     setBusy((current) => ({ ...current, login: true }));
@@ -588,6 +1272,89 @@ export function App() {
       });
     } finally {
       setBusy((current) => ({ ...current, login: false }));
+    }
+  };
+
+  const focusComposer = () => {
+    window.requestAnimationFrame(() => {
+      composerInputRef.current?.focus();
+    });
+  };
+
+  const closeBoardDialog = () => {
+    setBoardDialog(null);
+  };
+
+  const handleOpenGoalDetails = () => {
+    setBoardDialog({ kind: "goal" });
+  };
+
+  const handleOpenFeatureDetails = (featureId: string) => {
+    setBoardDialog({ kind: "feature", featureId });
+  };
+
+  const handleOpenFeatureCoordination = (featureId: string) => {
+    setBoardDialog({ kind: "coordination", featureId });
+  };
+
+  const handleOpenHistory = () => {
+    setBoardDialog({ kind: "history" });
+  };
+
+  const handleOpenFeatureChat = async (feature: CoordexPlanFeature) => {
+    if (!selectedProjectId) {
+      return;
+    }
+
+    const roleName = feature.ownerRole.trim();
+    if (!roleName) {
+      setNotice({
+        tone: "error",
+        message: "Assign one implementation role before opening this subfunction."
+      });
+      return;
+    }
+
+    const targetChat =
+      chats.find((chat) => chat.kind === "agent" && normalizeRoleName(chat.roleName) === normalizeRoleName(roleName)) ?? null;
+    if (!targetChat) {
+      setNotice({
+        tone: "error",
+        message: `Create and initialize the ${roleName} agent before executing this subfunction.`
+      });
+      return;
+    }
+
+    try {
+      if (
+        targetChat.id !== selectedChatId &&
+        messageText.trim() &&
+        !window.confirm(`This will clear the current unsent composer text and immediately start ${feature.title || feature.id} with ${roleName}. Continue?`)
+      ) {
+        focusComposer();
+        return;
+      }
+
+      if (targetChat.id !== selectedChatId) {
+        setMessageText("");
+      }
+
+      const execution = await api.executeFeature(selectedProjectId, feature.id);
+      setProjectBoard(execution.board);
+      setBoardDirty(false);
+      setRunningTurnId(execution.turnId);
+      setDraftAssistantText("");
+      closeBoardDialog();
+      await loadChat(execution.chat.id, execution.chat.projectId);
+      setNotice({
+        tone: "info",
+        message: `Started ${feature.title || feature.id} with ${roleName}. Coordex will auto-route in-scope coordination until completion or failure.`
+      });
+    } catch (error) {
+      setNotice({
+        tone: "error",
+        message: error instanceof Error ? error.message : String(error)
+      });
     }
   };
 
@@ -610,95 +1377,138 @@ export function App() {
       style={
         {
           "--sidebar-width": `${sidebarWidth}px`
-        } as React.CSSProperties
+        } as CSSProperties
       }
     >
       <aside className="sidebar-shell">
         <header className="sidebar-header">
-          <div>
-            <p className="eyebrow">Coordination</p>
-            <h1>Coordex</h1>
-            <p className="sidebar-copy">Fixed project controls on the left, live Codex thread context on the right.</p>
+          <div className="sidebar-brand">
+            <div className="sidebar-title-row">
+              <h1>Coordex</h1>
+              <button
+                className={`title-auth-button ${auth?.status === "authenticated" ? "title-auth-button-active" : ""}`}
+                type="button"
+                onClick={() => void handleLoginStart()}
+                disabled={busy.login || auth?.status === "authenticated"}
+                aria-label={auth?.status === "authenticated" ? "Authenticated" : "Login"}
+                title={auth?.status === "authenticated" ? "Authenticated" : "Start ChatGPT login"}
+              >
+                {busy.login ? "opening" : auth?.status === "authenticated" ? "authenticated" : "login"}
+              </button>
+            </div>
+            <p className="sidebar-copy">Visible project coordination over Codex threads.</p>
           </div>
-          <button className="primary-button sidebar-new-project" onClick={() => setProjectFormOpen((current) => !current)}>
-            {projectFormOpen ? "Close" : "New Project"}
-          </button>
         </header>
 
         {projectFormOpen ? (
-          <form className="sidebar-form" onSubmit={handleProjectCreate}>
+          <form className="sidebar-form" onSubmit={handleProjectSubmit}>
             <label>
               <span>Name</span>
-              <input value={projectName} onChange={(event) => setProjectName(event.target.value)} placeholder="SlgGame" />
+              <input value={projectName} onChange={(event) => setProjectName(event.target.value)} placeholder="Coordex" />
             </label>
             <label>
               <span>Root path</span>
               <input
                 value={projectRootPath}
                 onChange={(event) => setProjectRootPath(event.target.value)}
-                placeholder="/Users/mawei/MyWork/SlgGame"
+                placeholder="/Users/mawei/MyWork/coordex"
               />
             </label>
             <div className="inline-actions">
               <button className="primary-button" disabled={busy.project}>
-                {busy.project ? "Saving..." : "Create Project"}
+                {busy.project ? "Saving..." : isEditingProject ? "Save Project" : "Create Project"}
               </button>
-              <button className="ghost-button" type="button" onClick={() => setProjectFormOpen(false)}>
+              <button className="ghost-button" type="button" onClick={closeProjectForm}>
                 Cancel
               </button>
             </div>
           </form>
         ) : null}
 
-        {projects.length ? (
-          <section className="project-switcher">
-            <label>
-              <span>Project</span>
-              <select
-                value={selectedProjectId ?? ""}
-                onChange={(event) => void handleProjectChange(event.target.value)}
-              >
-                {projects.map((project) => (
-                  <option key={project.id} value={project.id}>
-                    {project.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+        <section className="project-switcher">
+          <div className="panel-header">
+            <strong>Project</strong>
+            <button
+              className="panel-add-button"
+              type="button"
+              onClick={() => (projectFormOpen ? closeProjectForm() : openProjectCreateForm())}
+              aria-label={projectFormOpen ? "Close project form" : "Create project"}
+              title={projectFormOpen ? "Close project form" : "Create project"}
+            >
+              <IconPlus />
+            </button>
+          </div>
 
-            {selectedProject ? (
-              <div className="project-meta">
-                <strong>{selectedProject.name}</strong>
-                <span className="path-text">{selectedProject.rootPath}</span>
-                <small>Opened {formatTime(selectedProject.lastOpenedAt)}</small>
-              </div>
-            ) : null}
+          <select
+            value={selectedProjectId ?? ""}
+            onChange={(event) => void handleProjectChange(event.target.value)}
+            disabled={!projects.length}
+            aria-label="Select project"
+          >
+            {projects.length ? (
+              projects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))
+            ) : (
+              <option value="">No project registered</option>
+            )}
+          </select>
 
-            <div className="project-toolbar">
-              <button
-                className="action-chip"
-                onClick={() => selectedProjectId && void loadProject(selectedProjectId, false)}
-                disabled={!selectedProjectId || busy.project}
-              >
-                Refresh
-              </button>
-              <button
-                className="action-chip"
-                onClick={() => void openSidebarComposer("chat")}
-                disabled={!selectedProjectId || busy.chat}
-              >
-                + Chat
-              </button>
-              <button
-                className="action-chip action-chip-accent"
-                onClick={() => void openSidebarComposer("agent")}
-                disabled={!selectedProjectId || busy.agent}
-              >
-                + Agent
-              </button>
-            </div>
-          </section>
-        ) : null}
+          <div className="project-toolbar-icons">
+            <button
+              className="panel-icon-button"
+              type="button"
+              onClick={() => selectedProjectId && void loadProject(selectedProjectId, false, { includeBoard: false })}
+              disabled={!selectedProjectId || busy.project}
+              aria-label="Refresh project threads"
+              title="Refresh project threads"
+            >
+              <IconRefresh />
+            </button>
+            <button
+              className="panel-icon-button"
+              type="button"
+              onClick={openProjectEditForm}
+              disabled={!selectedProjectId || busy.project}
+              aria-label="Edit project"
+              title="Edit project"
+            >
+              <IconEdit />
+            </button>
+            <button
+              className={`panel-icon-button ${sidebarComposerMode === "chat" ? "panel-icon-button-accent" : ""}`}
+              type="button"
+              onClick={() => void toggleSidebarComposer("chat")}
+              disabled={!selectedProjectId || busy.chat}
+              aria-label="Create root chat"
+              title="Create root chat"
+            >
+              <IconChat />
+            </button>
+            <button
+              className={`panel-icon-button ${sidebarComposerMode === "agent" ? "panel-icon-button-accent" : ""}`}
+              type="button"
+              onClick={() => void toggleSidebarComposer("agent")}
+              disabled={!selectedProjectId || busy.agent}
+              aria-label="Open agent setup"
+              title="Open agent setup"
+            >
+              <IconAgent />
+            </button>
+            <button
+              className="panel-icon-button panel-icon-button-danger"
+              type="button"
+              onClick={() => void handleProjectDelete()}
+              disabled={!selectedProjectId || busy.project}
+              aria-label="Remove project"
+              title="Remove project"
+            >
+              <IconRemove />
+            </button>
+          </div>
+        </section>
 
         {sidebarComposerMode === "chat" && selectedProject ? (
           <form className="sidebar-composer" onSubmit={handleChatCreate}>
@@ -718,59 +1528,116 @@ export function App() {
         {sidebarComposerMode === "agent" && selectedProject ? (
           <section className="sidebar-composer">
             <div className="composer-header">
-              <strong>New agent thread</strong>
+              <strong>Agent Setup</strong>
               <button className="ghost-link" type="button" onClick={closeSidebarComposer}>
                 Cancel
               </button>
             </div>
 
-            <label>
-              <span>Project template</span>
-              <select value={agentProjectTemplateKey} onChange={(event) => setAgentProjectTemplateKey(event.target.value)}>
-                {AGENT_PROJECT_TEMPLATES.map((template) => (
-                  <option key={template.key} value={template.key}>
-                    {template.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            {selectedAgentProjectTemplate ? (
-              <div className="template-note">
-                <strong>{selectedAgentProjectTemplate.label}</strong>
-                <span>{selectedAgentProjectTemplate.description}</span>
-              </div>
-            ) : null}
-
-            <div className="role-chip-grid">
-              {selectedAgentProjectTemplate?.roles.map((template) => (
-                <button
-                  key={template.key}
-                  className="role-chip"
-                  onClick={() =>
-                    void createAgent({
-                      projectTemplateKey: selectedAgentProjectTemplate.key,
-                      templateKey: template.key
-                    })
-                  }
-                  disabled={busy.agent}
-                >
-                  <strong>{template.label}</strong>
-                  <span>{selectedAgentProjectTemplate.directoryName}/{template.directoryName}</span>
-                </button>
-              ))}
+            <div className="agent-setup-tabs" role="tablist" aria-label="Agent setup mode">
+              <button
+                className={`agent-setup-tab ${agentSetupTab === "template" ? "agent-setup-tab-active" : ""}`}
+                type="button"
+                role="tab"
+                aria-selected={agentSetupTab === "template"}
+                onClick={() => setAgentSetupTab("template")}
+              >
+                Template
+              </button>
+              <button
+                className={`agent-setup-tab ${agentSetupTab === "custom" ? "agent-setup-tab-active" : ""}`}
+                type="button"
+                role="tab"
+                aria-selected={agentSetupTab === "custom"}
+                onClick={() => setAgentSetupTab("custom")}
+              >
+                Custom
+              </button>
             </div>
 
-            <form className="inline-form" onSubmit={handleCustomAgentCreate}>
-              <input
-                value={customRoleName}
-                onChange={(event) => setCustomRoleName(event.target.value)}
-                placeholder="custom role name"
-              />
-              <button className="secondary-button" disabled={busy.agent || !customRoleName.trim()}>
-                {busy.agent ? "Creating..." : "Custom Role"}
-              </button>
-            </form>
+            {agentSetupTab === "template" ? (
+              <>
+                <label>
+                  <span>Template</span>
+                  <select value={agentProjectTemplateKey} onChange={(event) => setAgentProjectTemplateKey(event.target.value)}>
+                    {AGENT_PROJECT_TEMPLATES.map((template) => (
+                      <option key={template.key} value={template.key}>
+                        {template.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <div className="sidebar-subsection">
+                  <div className="sidebar-subsection-header">
+                    <strong>Template Roles</strong>
+                    <span className="muted">{selectedTemplateRoleKeys.length} selected</span>
+                  </div>
+
+                  <div className="template-role-list">
+                    {templateRoleRows.map((role) => (
+                      <label
+                        key={role.key}
+                        className={`template-role-row ${role.exists ? "template-role-row-existing" : ""}`}
+                        title={role.description}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={role.exists ? true : selectedTemplateRoleKeys.includes(role.key)}
+                          onChange={() => handleTemplateRoleToggle(role.key)}
+                          disabled={role.exists || busy.agent}
+                        />
+                        <div className="template-role-meta">
+                          <strong>{role.label}</strong>
+                        </div>
+                        <span className={`template-role-badge ${role.exists ? "template-role-badge-existing" : ""}`}>
+                          {role.exists ? "Exists" : "Ready"}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+
+                  <div className="sidebar-inline-actions">
+                    <button className="ghost-button" type="button" onClick={handleSelectAllTemplateRoles} disabled={busy.agent}>
+                      All
+                    </button>
+                    <button className="ghost-button" type="button" onClick={handleClearTemplateRoles} disabled={busy.agent}>
+                      None
+                    </button>
+                    <button
+                      className="primary-button"
+                      type="button"
+                      onClick={() => void handleTemplateAgentCreate()}
+                      disabled={busy.agent || !selectedTemplateRoleKeys.length}
+                    >
+                      {busy.agent ? "Creating..." : "Create Selected"}
+                    </button>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <form className="sidebar-subsection agent-custom-form" onSubmit={handleCustomAgentCreate}>
+                <label>
+                  <span>Role name</span>
+                  <input
+                    value={customRoleName}
+                    onChange={(event) => setCustomRoleName(event.target.value)}
+                    placeholder="producer"
+                  />
+                </label>
+                <label>
+                  <span>Responsibility</span>
+                  <textarea
+                    value={customRolePurpose}
+                    onChange={(event) => setCustomRolePurpose(event.target.value)}
+                    placeholder="Own release coordination, cross-role timing, and final acceptance prep."
+                  />
+                </label>
+                <button className="secondary-button" disabled={busy.agent || !customRoleName.trim()}>
+                  {busy.agent ? "Creating..." : "Create Custom Agent"}
+                </button>
+              </form>
+            )}
           </section>
         ) : null}
 
@@ -779,7 +1646,6 @@ export function App() {
         <div className="thread-list-panel">
           <div className="thread-list-header">
             <p className="eyebrow">Threads</p>
-            <h2>{selectedProject?.name ?? "No project"}</h2>
           </div>
 
           <div className="thread-tree">
@@ -793,10 +1659,12 @@ export function App() {
                   >
                     <div className="thread-link-row">
                       <strong>{chat.title}</strong>
-                      <span className={`pill pill-kind-${chat.kind}`}>{chat.kind}</span>
+                      <div className="thread-link-badges">
+                        {isPendingAgent(chat) ? <span className="pill pill-state-pending">not started</span> : null}
+                        <span className={`pill pill-kind-${chat.kind}`}>{chat.kind}</span>
+                      </div>
                     </div>
-                    <span>{describeChatScope(chat, selectedProject)}</span>
-                    <small>Updated {formatTime(chat.lastOpenedAt)}</small>
+                    <span className="thread-link-responsibility">{describeChatResponsibility(chat)}</span>
                   </button>
                 ))
               ) : (
@@ -808,18 +1676,6 @@ export function App() {
           </div>
         </div>
 
-        <footer className="sidebar-footer">
-          <div className="auth-inline">
-            <span className={`auth-badge auth-${auth?.status ?? "unknown"}`}>{auth?.status ?? "unknown"}</span>
-            <div>
-              <strong>{auth?.email ?? "No active Codex account detected."}</strong>
-              <p className="muted">{auth?.mode ? `${auth.mode} · ${auth.planType ?? "plan unknown"}` : "ChatGPT login available."}</p>
-            </div>
-          </div>
-          <button className="ghost-button" onClick={handleLoginStart} disabled={busy.login}>
-            {busy.login ? "Opening..." : "Start ChatGPT Login"}
-          </button>
-        </footer>
       </aside>
 
       <div
@@ -833,22 +1689,157 @@ export function App() {
       </div>
 
       <section className="thread-stage">
-        <header className="thread-stage-header">
-          <div>
-            <p className="eyebrow">Thread</p>
-            <h2>{chatDetail?.chat.title ?? "No chat selected"}</h2>
-            <p className="muted">
-              {chatDetail
-                ? `${chatDetail.chat.cwd} · ${formatThreadStatus(chatDetail.thread.status)}`
-                : "Select a project thread from the left sidebar."}
-            </p>
-          </div>
-          {chatDetail ? <span className={`pill pill-kind-${chatDetail.chat.kind}`}>{chatDetail.chat.kind}</span> : null}
-        </header>
+        {selectedProject ? (
+          <section className="board-shell">
+            {projectBoard && activePlan ? (
+              <>
+                <div className="board-topbar">
+                  <div className="board-goal-row board-goal-card">
+                    <span className="board-row-label">Goal</span>
+                    <span className="board-goal-text" title={activePlan.goal || "No goal recorded yet."}>
+                      {activePlan.goal || "No goal recorded yet."}
+                    </span>
+                    <div className="board-hover-anchor">
+                      <button
+                        className="board-row-icon-button"
+                        type="button"
+                        onClick={handleOpenGoalDetails}
+                        aria-label="Open full goal"
+                        title="Open full goal"
+                      >
+                        <IconEllipsis />
+                      </button>
+                      {renderGoalPreviewCard(activePlan.goal)}
+                    </div>
+                  </div>
+
+                  <button
+                    className="board-history-button board-history-button-standalone"
+                    type="button"
+                    onClick={handleOpenHistory}
+                    aria-label="Open history"
+                    title="Open history"
+                  >
+                    <IconHistory />
+                    <span>History</span>
+                  </button>
+                </div>
+
+                {activePlan.features.length ? (
+                  <div className="board-feature-list">
+                    {activePlan.features.map((feature) => (
+                      <article
+                        key={feature.id}
+                        className={[
+                          "board-feature-row",
+                          feature.done ? "board-feature-row-done" : "",
+                          feature.runState === "running" ? "board-feature-row-running" : "",
+                          feature.runState === "blocked" ? "board-feature-row-blocked" : ""
+                        ]
+                          .filter(Boolean)
+                          .join(" ")}
+                      >
+                        <span
+                          className={[
+                            "board-feature-state",
+                            feature.done
+                              ? "board-feature-state-done"
+                              : feature.runState === "running"
+                                ? "board-feature-state-running"
+                                : feature.runState === "blocked"
+                                  ? "board-feature-state-blocked"
+                                  : "board-feature-state-open"
+                          ].join(" ")}
+                          title={describeFeatureState(feature)}
+                        >
+                          {feature.done ? (
+                            <IconCheckCircle />
+                          ) : feature.runState === "running" ? (
+                            <span>R</span>
+                          ) : feature.runState === "blocked" ? (
+                            <span>!</span>
+                          ) : (
+                            <span>{feature.ownerRole.trim().slice(0, 1).toUpperCase() || "?"}</span>
+                          )}
+                        </span>
+
+                        <span
+                          className="board-feature-text"
+                          title={`${describeFeatureState(feature)} · ${buildFeatureSummary(feature)}`}
+                        >
+                          {buildFeatureSummary(feature)}
+                        </span>
+
+                        <div className="board-hover-anchor">
+                          <button
+                            className="board-row-icon-button"
+                            type="button"
+                            onClick={() => handleOpenFeatureCoordination(feature.id)}
+                            aria-label="Open subfunction coordination"
+                            title="Open subfunction coordination"
+                          >
+                            <IconChat />
+                          </button>
+                          {renderCoordinationPreviewCard(feature)}
+                        </div>
+
+                        <div className="board-hover-anchor">
+                          <button
+                            className="board-row-icon-button"
+                            type="button"
+                            onClick={() => handleOpenFeatureDetails(feature.id)}
+                            aria-label="Open subfunction details"
+                            title="Open subfunction details"
+                          >
+                            <IconEllipsis />
+                          </button>
+                          {renderFeaturePreviewCard(feature)}
+                        </div>
+
+                        {!feature.done ? (
+                          <button
+                            className="board-row-icon-button board-row-icon-button-accent"
+                            type="button"
+                            onClick={() => void handleOpenFeatureChat(feature)}
+                            disabled={!feature.ownerRole.trim() || feature.runState === "running" || busy.agent || busy.chat || busy.send}
+                            aria-label={
+                              feature.runState === "running"
+                                ? `${feature.title || feature.id} is already running`
+                                : `Execute with ${feature.ownerRole || "assigned role"}`
+                            }
+                            title={
+                              feature.runState === "running"
+                                ? "This subfunction is already running."
+                                : feature.ownerRole.trim()
+                                  ? `Execute with ${feature.ownerRole}`
+                                  : "Assign a role first"
+                            }
+                          >
+                            <IconLaunch />
+                          </button>
+                        ) : null}
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="empty-thread board-empty">
+                    <h3>No subfunctions yet</h3>
+                    <p>Current goal is loaded, but no single-role subfunctions are recorded yet.</p>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="empty-thread board-empty">
+                <h3>Loading current plan</h3>
+                <p>Coordex is reading this project's local board data.</p>
+              </div>
+            )}
+          </section>
+        ) : null}
 
         <div className="thread-scroll" ref={threadScrollRef}>
           {chatDetail ? (
-            timeline.length || draftAssistantText ? (
+            timeline.length || draftAssistantText || isTurnRunning ? (
               <>
                 {timeline.map(({ turnId, item }) => {
                   const rendered = renderItem(item);
@@ -862,11 +1853,20 @@ export function App() {
                     </article>
                   );
                 })}
+                {isTurnRunning && !draftAssistantText ? (
+                  <article className="message-card message-assistant live message-assistant-thinking">
+                    <header>
+                      <span>Codex</span>
+                      <small>{runningTurnId?.slice(0, 8) ?? "live"}</small>
+                    </header>
+                    <pre>Thinking…</pre>
+                  </article>
+                ) : null}
                 {draftAssistantText ? (
                   <article className="message-card message-assistant live">
                     <header>
                       <span>Codex</span>
-                      <small>live</small>
+                      <small>{runningTurnId?.slice(0, 8) ?? "live"}</small>
                     </header>
                     <pre>{draftAssistantText}</pre>
                   </article>
@@ -889,19 +1889,193 @@ export function App() {
         <footer className="composer">
           <form onSubmit={handleMessageSend}>
             <textarea
+              ref={composerInputRef}
               value={messageText}
               onChange={(event) => setMessageText(event.target.value)}
-              placeholder="Send a plain-text instruction into the selected Codex thread..."
+              placeholder="Send a structured instruction into the selected Codex thread..."
               disabled={!chatDetail || busy.send}
             />
             <div className="composer-row">
-              <span className="muted">{chatDetail ? `Last updated ${formatTime(chatDetail.thread.updatedAt)}` : "No thread selected"}</span>
+              <span className={`muted ${isTurnRunning ? "composer-status-running" : ""}`}>{composerStatus}</span>
               <button className="primary-button" disabled={!chatDetail || busy.send || !messageText.trim()}>
                 {busy.send ? "Sending..." : "Send"}
               </button>
             </div>
           </form>
         </footer>
+
+        {boardDialog && activePlan ? (
+          <div className="board-modal-backdrop" role="presentation" onClick={closeBoardDialog}>
+            <section
+              className="board-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-label={
+                boardDialog.kind === "goal"
+                  ? "Current goal"
+                  : boardDialog.kind === "feature"
+                    ? "Subfunction details"
+                    : boardDialog.kind === "coordination"
+                      ? "Subfunction coordination"
+                      : "History"
+              }
+              onClick={(event) => event.stopPropagation()}
+            >
+              <header className="board-modal-header">
+                <strong>
+                  {boardDialog.kind === "goal"
+                    ? "Current Goal"
+                    : boardDialog.kind === "feature"
+                      ? "Subfunction"
+                      : boardDialog.kind === "coordination"
+                        ? "Coordination Log"
+                        : "Plan History"}
+                </strong>
+                <button className="ghost-button" type="button" onClick={closeBoardDialog}>
+                  Close
+                </button>
+              </header>
+
+              {boardDialog.kind === "goal" ? (
+                <div className="board-modal-body">
+                  <p>{activePlan.goal || "No goal recorded yet."}</p>
+                </div>
+              ) : null}
+
+              {boardDialog.kind === "feature" ? (
+                activeBoardDialogFeature ? (
+                  <div className="board-modal-body">
+                    <div className="board-modal-meta">
+                      <span className={`pill ${activeBoardDialogFeature.done ? "pill-kind-chat" : "pill-kind-agent"}`}>
+                        {describeFeatureState(activeBoardDialogFeature).toLowerCase()}
+                      </span>
+                      <span className="pill pill-kind-chat">{activeBoardDialogFeature.ownerRole || "unassigned"}</span>
+                      <span className="muted">Updated {formatTime(activeBoardDialogFeature.updatedAt)}</span>
+                    </div>
+
+                    <h3>{activeBoardDialogFeature.title || "Untitled subfunction"}</h3>
+                    <div className="board-modal-section">
+                      <span className="board-conversation-role">Description</span>
+                      <p>{activeBoardDialogFeature.description || "No detailed description recorded for this subfunction."}</p>
+                    </div>
+
+                    {!activeBoardDialogFeature.done ? (
+                      <div className="board-modal-actions">
+                        <button
+                          className="secondary-button"
+                          type="button"
+                          onClick={() => void handleOpenFeatureChat(activeBoardDialogFeature)}
+                          disabled={
+                            !activeBoardDialogFeature.ownerRole.trim() ||
+                            activeBoardDialogFeature.runState === "running" ||
+                            busy.agent ||
+                            busy.chat ||
+                            busy.send
+                          }
+                        >
+                          {activeBoardDialogFeature.runState === "running"
+                            ? "Already running"
+                            : activeBoardDialogFeature.ownerRole.trim()
+                            ? `Execute with ${activeBoardDialogFeature.ownerRole}`
+                            : "Assign a role first"}
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="board-modal-body">
+                    <p>No subfunction detail is currently available for this row.</p>
+                  </div>
+                )
+              ) : null}
+
+              {boardDialog.kind === "coordination" ? (
+                activeBoardDialogFeature ? (
+                  <div className="board-modal-body board-modal-conversations">
+                    <div className="board-modal-meta">
+                      <span className="pill pill-kind-chat">{activeBoardDialogFeature.ownerRole || "unassigned"}</span>
+                      <span className="muted">
+                        {activeBoardDialogFeature.coordinations.length} coordination
+                        {activeBoardDialogFeature.coordinations.length === 1 ? "" : "s"}
+                      </span>
+                    </div>
+
+                    <h3>{activeBoardDialogFeature.title || "Untitled subfunction"}</h3>
+
+                    {activeBoardDialogFeature.coordinations.length ? (
+                      <div className="board-conversation-list">
+                        {activeBoardDialogFeature.coordinations.map((coordination) => (
+                          <article key={coordination.id} className="board-conversation-card">
+                            <header>
+                              <strong>{getCoordinationLabel(coordination)}</strong>
+                              <small>{formatTime(coordination.updatedAt)}</small>
+                            </header>
+
+                            <div className="board-modal-meta">
+                              <span className="pill pill-kind-agent">{formatCoordinationKind(coordination.kind)}</span>
+                              <span className="pill pill-kind-chat">{formatCoordinationStatus(coordination.status)}</span>
+                              <span className="muted">Created {formatTime(coordination.createdAt)}</span>
+                            </div>
+
+                            <div className="board-conversation-turns">
+                              <div className="board-conversation-turn">
+                                <span className="board-conversation-role">Summary</span>
+                                <p>{coordination.summary || "No summary recorded."}</p>
+                              </div>
+                              <div className="board-conversation-turn">
+                                <span className="board-conversation-role">Input</span>
+                                <p>{coordination.input || "No structured input recorded."}</p>
+                              </div>
+                              <div className="board-conversation-turn">
+                                <span className="board-conversation-role">Expected Output</span>
+                                <p>{coordination.expectedOutput || "No expected output recorded."}</p>
+                              </div>
+                              <div className="board-conversation-turn">
+                                <span className="board-conversation-role">Output</span>
+                                <p>{coordination.output || "No output recorded yet."}</p>
+                              </div>
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="empty-note">No structured coordination record has been saved for this subfunction yet.</p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="board-modal-body">
+                    <p>No coordination record is currently available for this row.</p>
+                  </div>
+                )
+              ) : null}
+
+              {boardDialog.kind === "history" ? (
+                <div className="board-modal-body">
+                  {projectBoard.history.length ? (
+                    <div className="board-history-list">
+                      {projectBoard.history.map((plan) => (
+                        <article key={plan.id} className="board-history-card">
+                          <header>
+                            <strong>{plan.goal || "No goal recorded."}</strong>
+                            <small>{formatTime(plan.archivedAt ?? plan.updatedAt)}</small>
+                          </header>
+                          <div className="board-modal-meta">
+                            <span className="pill pill-kind-chat">
+                              {plan.features.filter((feature) => feature.done).length}/{plan.features.length} done
+                            </span>
+                            <span className="muted">Created {formatTime(plan.createdAt)}</span>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="empty-note">No archived plans yet.</p>
+                  )}
+                </div>
+              ) : null}
+            </section>
+          </div>
+        ) : null}
       </section>
     </main>
   );

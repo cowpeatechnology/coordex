@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .codex/hooks/session-start-context.mjs",
+            "statusMessage": "Loading Coordex session constraints"
+          }
+        ]
+      }
+    ]
+  }
+}

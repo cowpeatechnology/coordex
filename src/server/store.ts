@@ -12,7 +12,7 @@ type DiscoveredThread = {
   updatedAt: number;
 };
 
-const STATE_VERSION = 2;
+const STATE_VERSION = 3;
 
 const defaultState = (): CoordexState => ({
   version: STATE_VERSION,
@@ -25,6 +25,12 @@ const defaultState = (): CoordexState => ({
 });
 
 const isoNow = (): string => new Date().toISOString();
+
+const belongsToProjectRoot = (cwd: string, projectRoot: string): boolean => {
+  const normalizedCwd = resolve(cwd).replace(/\\/g, "/");
+  const normalizedProjectRoot = resolve(projectRoot).replace(/\\/g, "/");
+  return normalizedCwd === normalizedProjectRoot || normalizedCwd.startsWith(`${normalizedProjectRoot}/`);
+};
 
 type LegacyState = {
   version?: number;
@@ -63,6 +69,10 @@ export class StateStore {
 
   getChat(chatId: string): CoordexChat | undefined {
     return this.state.chats.find((chat) => chat.id === chatId);
+  }
+
+  getChatByThreadId(threadId: string): CoordexChat | undefined {
+    return this.state.chats.find((chat) => chat.threadId === threadId);
   }
 
   getChatsForProject(projectId: string): CoordexChat[] {
@@ -107,7 +117,32 @@ export class StateStore {
     }
 
     const now = isoNow();
-    const byThreadId = new Map(this.state.chats.map((chat) => [chat.threadId, chat]));
+    const discoveredThreadIds = new Set(discoveredThreads.map((thread) => thread.threadId));
+    const removedChatIds = new Set<string>();
+    this.state.chats = this.state.chats.filter((chat) => {
+      if (chat.projectId !== projectId) {
+        return true;
+      }
+
+      const stillBelongsToProject = belongsToProjectRoot(chat.cwd, project.rootPath);
+      const keepBecausePending = chat.launchState === "pending";
+      const keepBecauseDiscovered = discoveredThreadIds.has(chat.threadId);
+      const keep = stillBelongsToProject && (keepBecausePending || keepBecauseDiscovered);
+      if (!keep) {
+        removedChatIds.add(chat.id);
+      }
+      return keep;
+    });
+
+    if (this.state.selection.chatId && removedChatIds.has(this.state.selection.chatId)) {
+      this.state.selection.chatId = null;
+    }
+
+    const byThreadId = new Map(
+      this.state.chats
+        .filter((chat) => chat.projectId === projectId)
+        .map((chat) => [chat.threadId, chat])
+    );
 
     for (const thread of discoveredThreads) {
       const existing = byThreadId.get(thread.threadId);
@@ -120,6 +155,7 @@ export class StateStore {
 
         existing.updatedAt = now;
         existing.cwd = thread.cwd;
+        existing.launchState = "active";
         if (existing.source === "imported") {
           existing.title = nextTitle;
         }
@@ -133,6 +169,7 @@ export class StateStore {
         title: nextTitle,
         source: "imported",
         kind: "chat",
+        launchState: "active",
         cwd: thread.cwd,
         roleName: null,
         roleDirectory: null,
@@ -147,6 +184,80 @@ export class StateStore {
     return this.getChatsForProject(projectId);
   }
 
+  updateProject(
+    projectId: string,
+    input: {
+      name: string;
+      rootPath: string;
+    }
+  ): CoordexProject {
+    const project = this.getProject(projectId);
+    if (!project) {
+      throw new Error(`Unknown project: ${projectId}`);
+    }
+
+    const name = input.name.trim();
+    const normalizedPath = resolve(input.rootPath);
+    if (!name || !normalizedPath) {
+      throw new Error("Both name and rootPath are required.");
+    }
+
+    const stat = statSync(normalizedPath, { throwIfNoEntry: false });
+    if (!stat || !stat.isDirectory()) {
+      throw new Error(`Project root does not exist or is not a directory: ${normalizedPath}`);
+    }
+
+    const duplicate = this.state.projects.find((entry) => entry.id !== projectId && entry.rootPath === normalizedPath);
+    if (duplicate) {
+      throw new Error(`Project root is already registered: ${normalizedPath}`);
+    }
+
+    const now = isoNow();
+    project.name = name;
+    project.rootPath = normalizedPath;
+    project.updatedAt = now;
+
+    const removedChatIds = new Set(
+      this.state.chats
+        .filter((chat) => chat.projectId === projectId && !belongsToProjectRoot(chat.cwd, normalizedPath))
+        .map((chat) => chat.id)
+    );
+
+    if (removedChatIds.size > 0) {
+      this.state.chats = this.state.chats.filter((chat) => !removedChatIds.has(chat.id));
+      if (this.state.selection.chatId && removedChatIds.has(this.state.selection.chatId)) {
+        this.state.selection.chatId = null;
+      }
+    }
+
+    this.persist();
+    return project;
+  }
+
+  deleteProject(projectId: string): void {
+    const project = this.getProject(projectId);
+    if (!project) {
+      throw new Error(`Unknown project: ${projectId}`);
+    }
+
+    const removedChatIds = new Set(
+      this.state.chats.filter((chat) => chat.projectId === projectId).map((chat) => chat.id)
+    );
+
+    this.state.projects = this.state.projects.filter((entry) => entry.id !== projectId);
+    this.state.chats = this.state.chats.filter((chat) => chat.projectId !== projectId);
+
+    if (this.state.selection.projectId === projectId) {
+      this.state.selection.projectId = null;
+    }
+
+    if (this.state.selection.chatId && removedChatIds.has(this.state.selection.chatId)) {
+      this.state.selection.chatId = null;
+    }
+
+    this.persist();
+  }
+
   registerChat(
     projectId: string,
     chatInput: {
@@ -154,6 +265,7 @@ export class StateStore {
       title: string;
       source: CoordexChat["source"];
       kind: CoordexChat["kind"];
+      launchState: CoordexChat["launchState"];
       cwd: string;
       roleName: string | null;
       roleDirectory: string | null;
@@ -172,6 +284,7 @@ export class StateStore {
       existing.title = chatInput.title.trim() || existing.title;
       existing.source = chatInput.source;
       existing.kind = chatInput.kind;
+      existing.launchState = chatInput.launchState;
       existing.cwd = resolve(chatInput.cwd);
       existing.roleName = chatInput.roleName;
       existing.roleDirectory = chatInput.roleDirectory;
@@ -190,6 +303,7 @@ export class StateStore {
       title: chatInput.title.trim() || "Untitled chat",
       source: chatInput.source,
       kind: chatInput.kind,
+      launchState: chatInput.launchState,
       cwd: resolve(chatInput.cwd),
       roleName: chatInput.roleName,
       roleDirectory: chatInput.roleDirectory,
@@ -201,6 +315,18 @@ export class StateStore {
     this.state.chats.push(chat);
     this.state.selection.projectId = projectId;
     this.state.selection.chatId = chat.id;
+    this.persist();
+    return chat;
+  }
+
+  updateChatLaunchState(chatId: string, launchState: CoordexChat["launchState"]): CoordexChat | undefined {
+    const chat = this.getChat(chatId);
+    if (!chat || chat.launchState === launchState) {
+      return chat;
+    }
+
+    chat.launchState = launchState;
+    chat.updatedAt = isoNow();
     this.persist();
     return chat;
   }
@@ -282,6 +408,12 @@ export class StateStore {
               title: typeof chat.title === "string" && chat.title.trim() ? chat.title.trim() : "Untitled chat",
               source: chat.source === "imported" ? "imported" : "coordex",
               kind: chat.kind === "agent" ? "agent" : "chat",
+              launchState:
+                chat.launchState === "active"
+                  ? "active"
+                  : chat.kind === "agent"
+                    ? "pending"
+                    : "active",
               cwd,
               roleName: typeof chat.roleName === "string" && chat.roleName.trim() ? chat.roleName.trim() : null,
               roleDirectory:
@@ -293,13 +425,23 @@ export class StateStore {
           })
       : [];
 
+    const rawSelectionProjectId = typeof input.selection?.projectId === "string" ? input.selection.projectId : null;
+    const rawSelectionChatId = typeof input.selection?.chatId === "string" ? input.selection.chatId : null;
+
+    const selectionProjectId =
+      rawSelectionProjectId && projectRootById.has(rawSelectionProjectId)
+        ? rawSelectionProjectId
+        : null;
+    const selectionChat =
+      rawSelectionChatId ? chats.find((chat) => chat.id === rawSelectionChatId) : undefined;
+
     return {
       version: STATE_VERSION,
       projects,
       chats,
       selection: {
-        projectId: typeof input.selection?.projectId === "string" ? input.selection.projectId : null,
-        chatId: typeof input.selection?.chatId === "string" ? input.selection.chatId : null
+        projectId: selectionProjectId,
+        chatId: selectionChat && selectionChat.projectId === selectionProjectId ? selectionChat.id : null
       }
     };
   }

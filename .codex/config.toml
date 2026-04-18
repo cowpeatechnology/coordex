@@ -1,0 +1,4 @@
+# Coordex project-scoped Codex config
+
+[features]
+codex_hooks = true

@@ -37,6 +37,7 @@ Important product distinction:
 - A Coordex `project` is currently local metadata bound to a filesystem root.
 - It is **not** an official Codex-native `Project` object exposed by app-server.
 - Thread discovery is currently inferred from Codex thread `cwd` values.
+- For current product language and sync behavior, treat the official Codex app's thread "delete" action as archive semantics unless app-server exposes a true hard-delete capability.
 
 Do not blur that distinction in code or docs.
 
@@ -81,6 +82,7 @@ Current project layout:
 - Keep Coordex local-first. Do not introduce remote infrastructure unless the user explicitly asks for it.
 - Do not claim access to Codex-native global projects unless app-server actually exposes that capability and the code uses it.
 - Do not hide project-level coordination behind black-box worker orchestration as the primary workflow.
+- Do not treat the dedicated Chrome workflow as optional. Browser validation for this repo is only valid when attached to the fixed dedicated Chrome instance documented in `docs/process/dedicated-browser-workflow.md`.
 - Do not couple Coordex to a specific game, repo, or domain in product language or architecture.
 - Do not let UI polish break the core workflows: auth, project binding, thread discovery, chat creation, resume, and message sending.
 - Do not treat temporary browser artifacts or screenshots as repository source files.
@@ -91,10 +93,14 @@ Current project layout:
 Supported today:
 
 - local project registration
+- project registration seeds a minimal bootstrap package for missing files under the target root, including root `AGENTS.md`, project docs, and project-scoped `.codex` SessionStart hook scaffolding
 - Codex auth status read and ChatGPT login start
 - project-scoped thread discovery by `cwd` prefix
 - root chat creation
+- automatic root-chat initialization immediately after chat creation, with success gated on receiving the first assistant reply
 - agent chat creation under `projectRoot/Agents/<role>/`
+- role creation also seeds durable role-state files under `docs/project/role-state/` for the created role
+- automatic role-thread initialization immediately after agent creation, with success gated on receiving the first assistant reply
 - last-selection restore
 - thread viewing
 - plain-text message sending
@@ -103,14 +109,19 @@ Supported today:
 Known limits that must stay visible in docs and planning:
 
 - no approvals UI yet
+- because approvals are not surfaced in the browser, Coordex-managed threads currently use `danger-full-access` plus `never` approval when started, resumed, or sent a turn through app-server
 - no official Codex project discovery API integration
 - thread discovery is heuristic, based on `cwd`
+- Coordex-created agents are auto-initialized during creation, but externally created or interrupted zero-turn role threads may still be readable by `thread/read` before `thread/list` starts returning them
+- even after activation, role threads started under `Agents/<role>/` may still be absent from the official Codex project view because app-server does not expose a project-scoped descendant-thread API or durable thread-to-project binding that Coordex can reuse
 - no multi-user or remote sync model
 - no write-time migration helpers for existing role directories yet
 
 ## 7. Agent and role conventions
 
 Coordex supports project-template-driven role creation.
+
+The confirmed operating model is documented in [docs/architecture/visible-multi-agent-operating-model.md](/Users/mawei/MyWork/coordex/docs/architecture/visible-multi-agent-operating-model.md).
 
 Current default role layout:
 
@@ -120,14 +131,30 @@ Current default role layout:
   - `supervisor`
   - `engineer`
   - `art_asset_producer`
-  - `qa_verifier`
+- default responsibility split:
+  - `supervisor` owns product direction, milestone planning, task routing, and final acceptance
+  - `engineer` owns technical architecture, implementation, integration, and technical validation
 
 Role creation rules:
 
 - role directories should use stable English names
 - role chats should start in `projectRoot/Agents/<role>/`
+- agent creation is a three-way sync operation across the role directory, the Codex thread started in that directory, and the generated role roster block in the project root `AGENTS.md`
+- agent creation should also ensure the durable per-role state file exists under `docs/project/role-state/<role>.md`
+- role creation is not complete until Coordex has sent the initialization prompt and received the first assistant reply for that role thread
+- role threads must start in `projectRoot/Agents/<role>/` so Codex loads the project root `AGENTS.md`, then `Agents/AGENTS.md`, then the role-local `AGENTS.md`
 - `Agents/AGENTS.md` may define shared role-space behavior
-- per-role local instructions should live in `AGENTS.override.md`
+- per-role local instructions should live in `Agents/<role>/AGENTS.md`
+- stable project facts belong in the project root `AGENTS.md` or durable project docs, not only in an initialization prompt
+- project registration should ensure a project-scoped `.codex` SessionStart reminder layer exists unless the project already defines its own files
+- direct peer coordination is allowed only inside an already active subfunction; task start, major scope changes, and acceptance still belong to the supervisor or human
+- role-to-role and role-to-supervisor coordination should use the structured contract documented in [docs/process/structured-agent-communication-protocol.md](/Users/mawei/MyWork/coordex/docs/process/structured-agent-communication-protocol.md) instead of drifting into unconstrained prose
+- role-specific mission, ownership, and handoff rules belong in `Agents/<role>/AGENTS.md`
+- avoid `AGENTS.override.md` unless same-directory replacement semantics are explicitly required
+- the initialization prompt should only bootstrap the role by pointing it at the already-loaded instruction chain plus a small read-only authority-doc set, then confirm readiness
+- root chats are temporary project-root conversations and are not part of the durable role roster
+- visible role chats are the primary collaboration surface; root chats are for temporary project-wide conversations
+- imported descendant chats may be read into a project by `cwd` prefix, but they are not the same product concept as durable role agents
 
 ## 8. Documentation discipline
 
@@ -152,6 +179,7 @@ If moving this repo into a clean standalone directory, preserve:
 - Preserve working local auth and thread flows while iterating on UI.
 - Verify with `npm run build` after meaningful changes.
 - For UI changes, inspect the rendered page in a browser instead of relying only on source review.
+- Browser validation for this repo must follow [docs/process/dedicated-browser-workflow.md](/Users/mawei/MyWork/coordex/docs/process/dedicated-browser-workflow.md).
 - Keep integration logic in the server layer explicit; avoid burying app-server assumptions inside UI code.
 - Treat `output/` as disposable local artifacts, not source.
 
@@ -161,3 +189,18 @@ If moving this repo into a clean standalone directory, preserve:
 - If a task adds a new Coordex concept, define whether it is local metadata, Codex-native state, or derived state.
 - If a task proposes automation or agents, bias toward visible operator control.
 - If a task would make Coordex repo-specific, stop and reframe it as a generic capability unless the user explicitly wants specialization.
+
+## Coordex Agent Roles
+
+<!-- COORDEX:AGENT-ROSTER:START -->
+This block is maintained by Coordex and keeps active role agents aligned across the local role directories under `Agents/`, the Codex threads started from those directories, and this project-level roster.
+
+Agent threads should start in `Agents/<role>/` so Codex loads instructions from the project root down to the role directory: this `AGENTS.md`, then `Agents/AGENTS.md`, then `Agents/<role>/AGENTS.md`.
+
+Root chats created from Coordex remain project-root conversations and are intentionally excluded from this role roster.
+
+| Role | Directory | Thread | Responsibility |
+| --- | --- | --- | --- |
+| _None yet_ | — | — | No role agents have been created from Coordex yet. |
+
+<!-- COORDEX:AGENT-ROSTER:END -->
