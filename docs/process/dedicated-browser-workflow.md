@@ -24,6 +24,8 @@ This is a hard requirement for this project, not a preference.
 - Only treat browser validation as complete if the agent can confirm it is attached to this dedicated Chrome instance.
 - Do not treat a generic `chrome-devtools` auto-connected browser as valid just because the tool itself is available.
 - Do not treat a default Chrome profile path such as `~/Library/Application Support/Google/Chrome/...` as valid evidence. That indicates attachment to the wrong browser instance.
+- Prefer reusing already-open tabs inside the dedicated browser session when they already show the needed preview or target page.
+- Do not open duplicate tabs for the same validation target unless a new tab is strictly required for the step being performed.
 - If that cannot be confirmed, do not claim browser verification is done. Ask the user to validate in the dedicated browser and report back.
 
 ## Practical confirmation
@@ -42,6 +44,26 @@ Valid confirmation means:
 - any claimed browser validation work can be tied back to this fixed browser target
 
 If a browser automation tool instead reports that it is looking for `DevToolsActivePort` under the default Chrome profile, that is not the dedicated browser workflow and the attempt is invalid for Coordex.
+
+## MCP configuration
+
+If the local `chrome-devtools` MCP server is enabled, its configuration should target the dedicated browser directly instead of using auto-connect.
+
+Preferred form:
+
+```toml
+[mcp_servers.chrome-devtools]
+args = ["--browser-url=http://127.0.0.1:9333"]
+```
+
+Do not use this workflow for Coordex:
+
+```toml
+[mcp_servers.chrome-devtools]
+args = ["--autoConnect", "--channel", "stable"]
+```
+
+Per the Chrome DevTools MCP documentation, `--autoConnect` attaches to Chrome's default profile selection, while `--browser-url` targets the already running debuggable browser instance explicitly. For this repo, only the explicit dedicated-browser target is valid.
 
 ## Reference
 

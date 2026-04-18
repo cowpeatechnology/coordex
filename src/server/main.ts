@@ -134,7 +134,17 @@ const readAuth = async (): Promise<AuthSummary> => {
 const autoCoordination = new AutoCoordinationRuntime({
   store,
   codex,
-  onBoardChanged: sendBoardEvent
+  onBoardChanged: sendBoardEvent,
+  onSelectionChanged: (projectId, chatId) => {
+    store.setSelection(projectId, chatId);
+    sendEvent({
+      type: "state.selection",
+      payload: {
+        projectId,
+        chatId
+      }
+    });
+  }
 });
 
 codex.on("notification", async (notification: { method: string; params?: Record<string, unknown> }) => {

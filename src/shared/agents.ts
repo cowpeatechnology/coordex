@@ -94,6 +94,7 @@ export const AGENT_PROJECT_TEMPLATES: AgentProjectTemplate[] = [
           "Accept scoped work from the human operator or the supervisor, not from peer worker threads acting on their own.",
           "Before non-trivial work, confirm the current milestone, affected directories, and validation path from project docs.",
           "If browser validation is required, the dedicated browser workflow is a hard constraint: reuse `http://127.0.0.1:9333` with remote-debugging-port `9333` and user-data-dir `/tmp/chrome-mcp-dedicated-9333`, and do not launch default Chrome, temporary profiles, or auto-connect fallback browsers.",
+          "When the required preview or target page is already open in the dedicated browser, reuse that existing tab instead of opening duplicate tabs. Only open a new tab when no suitable existing tab can serve the validation step.",
           "Prefer the documented runtime and debug loop over ad-hoc prototype paths when the project already has an accepted stack.",
           "When product intent and technical reality conflict, explain the tradeoff and route the decision back to the supervisor or human.",
           "When coordinating with another role or reporting completion, prefer the structured coordination protocol over freeform prose when that protocol doc exists."

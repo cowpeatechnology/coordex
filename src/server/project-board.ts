@@ -14,6 +14,7 @@ const COORDEX_DIRNAME = ".coordex";
 const BOARD_JSON_PATH = "project-board.json";
 const CURRENT_PLAN_MD_PATH = "current-plan.md";
 const PLAN_HISTORY_MD_PATH = "plan-history.md";
+const WAITING_FOR_NEXT_REQUIREMENT_GOAL = "All recorded plans are complete. Waiting for the next requirement.";
 
 const isoNow = (): string => new Date().toISOString();
 
@@ -35,6 +36,12 @@ const createEmptyPlan = (): CoordexPlan => {
     updatedAt: now,
     archivedAt: null
   };
+};
+
+const createWaitingPlan = (): CoordexPlan => {
+  const plan = createEmptyPlan();
+  plan.goal = WAITING_FOR_NEXT_REQUIREMENT_GOAL;
+  return plan;
 };
 
 const defaultBoard = (): CoordexProjectBoard => ({
@@ -495,6 +502,35 @@ const writeBoardArtifacts = (
   return normalizedBoard;
 };
 
+const finalizeCompletedActivePlan = (
+  board: CoordexProjectBoard
+): { board: CoordexProjectBoard; rolled: boolean } => {
+  const activePlan = board.activePlan;
+  if (activePlan.archivedAt || !activePlan.features.length || activePlan.features.some((feature) => !feature.done)) {
+    return { board, rolled: false };
+  }
+
+  const archivedAt = isoNow();
+  const archivedPlan: CoordexPlan = {
+    ...activePlan,
+    updatedAt: archivedAt,
+    archivedAt
+  };
+
+  const waitingPlan = createWaitingPlan();
+  waitingPlan.createdAt = archivedAt;
+  waitingPlan.updatedAt = archivedAt;
+
+  return {
+    rolled: true,
+    board: {
+      version: 4,
+      activePlan: waitingPlan,
+      history: [archivedPlan, ...board.history]
+    }
+  };
+};
+
 export function loadProjectBoard(projectRoot: string): CoordexProjectBoard {
   const paths = getCoordexPaths(projectRoot);
   const markdownExists = existsSync(paths.currentPlanMarkdownPath);
@@ -520,13 +556,15 @@ export function loadProjectBoard(projectRoot: string): CoordexProjectBoard {
       const markdown = readFileSync(paths.currentPlanMarkdownPath, "utf8");
       const parsedPlan = parseCurrentPlanMarkdown(markdown, board.activePlan);
       if (parsedPlan) {
+        const nextBoard = {
+          ...board,
+          activePlan: parsedPlan
+        };
+        const finalized = finalizeCompletedActivePlan(nextBoard);
         return writeBoardArtifacts(
           projectRoot,
-          {
-            ...board,
-            activePlan: parsedPlan
-          },
-          { preserveCurrentPlanMarkdown: true }
+          finalized.board,
+          finalized.rolled ? {} : { preserveCurrentPlanMarkdown: true }
         );
       }
     } catch {
@@ -544,7 +582,7 @@ export function loadProjectBoard(projectRoot: string): CoordexProjectBoard {
 export function saveProjectBoard(projectRoot: string, board: CoordexProjectBoard): CoordexProjectBoard {
   const normalizedBoard = normalizeBoard(board);
   normalizedBoard.activePlan.updatedAt = isoNow();
-  return writeBoardArtifacts(projectRoot, normalizedBoard);
+  return writeBoardArtifacts(projectRoot, finalizeCompletedActivePlan(normalizedBoard).board);
 }
 
 function locateFeature(board: CoordexProjectBoard, taskId: string): { plan: CoordexPlan; feature: CoordexPlanFeature } | null {
@@ -591,7 +629,7 @@ export function updateProjectBoardFeature(
     board.activePlan.updatedAt = updatedAt;
   }
 
-  return writeBoardArtifacts(projectRoot, board);
+  return writeBoardArtifacts(projectRoot, finalizeCompletedActivePlan(board).board);
 }
 
 export function archiveProjectBoardPlan(projectRoot: string): CoordexProjectBoard {

@@ -73,6 +73,7 @@ export function buildAgentInitializationPrompt(input: {
       ? [
           "If browser validation is required, treat the dedicated browser workflow as a hard constraint.",
           "Reuse the existing dedicated Chrome session at `http://127.0.0.1:9333` with remote-debugging-port `9333` and user-data-dir `/tmp/chrome-mcp-dedicated-9333` when that workflow doc exists.",
+          "Prefer reusing an already-open dedicated-browser tab for the target preview or page instead of opening duplicate tabs.",
           "Do not launch default Chrome, temporary Chrome profiles, or auto-connect browser sessions."
         ].join("\n")
       : null;

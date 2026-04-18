@@ -21,6 +21,8 @@ html,
 body,
 #root {
   min-height: 100%;
+  width: 100%;
+  min-width: 0;
 }
 
 body {
@@ -68,7 +70,12 @@ p {
 }
 
 .app-shell {
+  width: 100%;
+  min-width: 0;
+  min-height: 100vh;
+  min-height: 100dvh;
   height: 100vh;
+  height: 100dvh;
   display: grid;
   grid-template-columns: var(--sidebar-width, 340px) 12px minmax(0, 1fr);
   gap: 12px;
@@ -78,10 +85,13 @@ p {
 .sidebar-shell,
 .thread-stage {
   min-height: 0;
+  min-width: 0;
   border: 1px solid var(--line);
   border-radius: 28px;
   background: var(--panel);
   backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  isolation: isolate;
   box-shadow: var(--shadow);
 }
 
@@ -493,6 +503,8 @@ textarea {
   flex: 1;
   min-height: 0;
   display: grid;
+  align-content: start;
+  grid-auto-rows: max-content;
   gap: 8px;
   overflow: auto;
   padding-right: 4px;
@@ -501,17 +513,27 @@ textarea {
 .thread-link {
   width: 100%;
   display: grid;
+  grid-template-rows: auto auto;
+  align-content: start;
   gap: 6px;
+  min-height: 74px;
+  height: 74px;
   text-align: left;
   padding: 10px 11px;
   border: 1px solid transparent;
   border-radius: 16px;
   background: transparent;
   color: inherit;
+  cursor: pointer;
+  overflow: visible;
 }
 
 .thread-link strong {
+  min-width: 0;
   line-height: 1.18;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .thread-link span {
@@ -519,24 +541,29 @@ textarea {
   line-height: 1.35;
 }
 
+.thread-link-meta,
+.thread-link-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
 .thread-link-responsibility {
   color: var(--muted);
-  display: -webkit-box;
   font-size: 0.8rem;
-  line-height: 1.32;
+  line-height: 1.2;
   overflow: hidden;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .thread-link:hover,
-.thread-link.selected {
+.thread-link.selected,
+.thread-link:focus-visible {
   border-color: rgba(15, 106, 96, 0.2);
   background: rgba(239, 249, 247, 0.88);
-}
-
-.thread-link-row {
-  justify-content: space-between;
+  outline: none;
 }
 
 .thread-link-badges,
@@ -544,8 +571,50 @@ textarea {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: flex-end;
+}
+
+.thread-link-detail-anchor {
+  justify-self: end;
+}
+
+.thread-link-detail-button {
+  width: 22px;
+  height: 22px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid rgba(30, 39, 34, 0.08);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.78);
+  color: var(--muted);
+}
+
+.thread-link-detail-button:hover,
+.thread-link-detail-button:focus-visible {
+  border-color: rgba(30, 39, 34, 0.16);
+  color: var(--ink);
+  outline: none;
+}
+
+.thread-link-detail-button svg {
+  width: 12px;
+  height: 12px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.7;
+}
+
+.thread-link-detail-button svg circle {
+  fill: currentColor;
+  stroke: none;
+}
+
+.thread-link-hover-card {
+  right: 0;
+  min-width: 260px;
+  max-width: min(420px, calc(100vw - 64px));
 }
 
 .sidebar-empty {
@@ -1127,7 +1196,7 @@ textarea {
   resize: vertical;
 }
 
-@media (max-width: 1100px) {
+@media (max-width: 860px) {
   .app-shell {
     grid-template-columns: 1fr;
     height: auto;

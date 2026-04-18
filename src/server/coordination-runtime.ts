@@ -22,6 +22,7 @@ type RuntimeDependencies = {
   store: StateStore;
   codex: CodexAppServerClient;
   onBoardChanged: (projectId: string, board: CoordexProjectBoard) => void;
+  onSelectionChanged: (projectId: string, chatId: string) => void;
 };
 
 const isoNow = (): string => new Date().toISOString();
@@ -187,6 +188,7 @@ export class AutoCoordinationRuntime {
             .getChatsForProject(project.id)
             .find((candidate) => candidate.kind === "agent" && normalizeRoleName(candidate.roleName) === targetRole) ?? null
         : null;
+    const selectedChat = targetChat ?? chat;
 
     const nextRunState =
       targetRole === "human" ? (envelope.kind === "blocker" || envelope.status === "blocked" ? "blocked" : "idle") : targetChat ? "running" : "blocked";
@@ -211,6 +213,7 @@ export class AutoCoordinationRuntime {
       }
     });
     this.deps.onBoardChanged(project.id, board);
+    this.deps.onSelectionChanged(project.id, selectedChat.id);
 
     if (!targetChat) {
       return;
@@ -270,5 +273,6 @@ export class AutoCoordinationRuntime {
       }
     });
     this.deps.onBoardChanged(project.id, board);
+    this.deps.onSelectionChanged(project.id, chat.id);
   }
 }

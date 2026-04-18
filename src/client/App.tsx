@@ -36,6 +36,10 @@ const DEFAULT_SIDEBAR_WIDTH = 340;
 const MIN_SIDEBAR_WIDTH = 280;
 const MAX_SIDEBAR_WIDTH = 560;
 const SIDEBAR_WIDTH_STORAGE_KEY = "coordex.sidebarWidth";
+const APP_SHELL_HORIZONTAL_PADDING = 36;
+const APP_SHELL_TOTAL_COLUMN_GAP = 24;
+const APP_SHELL_SPLITTER_WIDTH = 12;
+const MIN_THREAD_STAGE_WIDTH = 360;
 
 function formatTime(value: string | number | null | undefined): string {
   if (!value) {
@@ -174,10 +178,26 @@ function getInitialSidebarWidth(): number {
   const raw = window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY);
   const parsed = raw ? Number(raw) : Number.NaN;
   if (!Number.isFinite(parsed)) {
-    return DEFAULT_SIDEBAR_WIDTH;
+    return clampSidebarWidthForViewport(DEFAULT_SIDEBAR_WIDTH, window.innerWidth);
   }
 
-  return Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, parsed));
+  return clampSidebarWidthForViewport(parsed, window.innerWidth);
+}
+
+function clampSidebarWidthForViewport(value: number, viewportWidth: number): number {
+  const maxAllowed = Math.max(
+    MIN_SIDEBAR_WIDTH,
+    Math.min(
+      MAX_SIDEBAR_WIDTH,
+      viewportWidth -
+        APP_SHELL_HORIZONTAL_PADDING -
+        APP_SHELL_TOTAL_COLUMN_GAP -
+        APP_SHELL_SPLITTER_WIDTH -
+        MIN_THREAD_STAGE_WIDTH
+    )
+  );
+
+  return Math.min(maxAllowed, Math.max(MIN_SIDEBAR_WIDTH, value));
 }
 
 function timelineLength(detail: ChatDetail | null): number {
@@ -203,6 +223,10 @@ function truncateText(value: string, maxLength: number): string {
   }
 
   return `${trimmed.slice(0, maxLength).trimEnd()}…`;
+}
+
+function needsThreadResponsibilityDetails(value: string): boolean {
+  return value.trim().length > 56;
 }
 
 function describeFeatureState(feature: CoordexPlanFeature): string {
@@ -325,6 +349,19 @@ function renderGoalPreviewCard(goal: string) {
   );
 }
 
+function renderThreadResponsibilityPreviewCard(chat: CoordexChat, responsibility: string) {
+  return (
+    <div className="board-hover-card thread-link-hover-card" role="presentation">
+      <strong>{chat.title}</strong>
+      <div className="board-hover-pills">
+        <span className={`pill pill-kind-${chat.kind}`}>{chat.kind}</span>
+        {chat.roleName ? <span className="pill pill-kind-agent">{chat.roleName}</span> : null}
+      </div>
+      <p>{responsibility || "No responsibility summary recorded."}</p>
+    </div>
+  );
+}
+
 function IconPlus() {
   return (
     <svg viewBox="0 0 20 20" aria-hidden="true">
@@ -439,6 +476,7 @@ export function App() {
   const [agentSetupTab, setAgentSetupTab] = useState<AgentSetupTab>("template");
   const [agentProjectTemplateKey, setAgentProjectTemplateKey] = useState(AGENT_PROJECT_TEMPLATES[0]?.key ?? "");
   const [sidebarWidth, setSidebarWidth] = useState(getInitialSidebarWidth);
+  const [layoutRefreshNonce, setLayoutRefreshNonce] = useState(0);
   const [boardDirty, setBoardDirty] = useState(false);
   const [boardDialog, setBoardDialog] = useState<BoardDialogState>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -684,6 +722,34 @@ export function App() {
       }
 
       if (payload.type === "state.selection") {
+        const nextProjectId = payload.payload.projectId;
+        const nextChatId = payload.payload.chatId;
+
+        if (nextProjectId === selectedProjectId && nextChatId === selectedChatId) {
+          return;
+        }
+
+        if (!nextProjectId) {
+          setSelectedProjectId(null);
+          setSelectedChatId(null);
+          setProjectBundle(null);
+          setProjectBoard(null);
+          setChatDetail(null);
+          setRunningTurnId(null);
+          setDraftAssistantText("");
+          return;
+        }
+
+        if (nextProjectId !== selectedProjectId) {
+          void openProject(nextProjectId, false, nextChatId);
+          return;
+        }
+
+        if (nextChatId) {
+          void loadChat(nextChatId, nextProjectId, false);
+          return;
+        }
+
         return;
       }
 
@@ -845,6 +911,38 @@ export function App() {
     return () => {
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", stopResize);
+    };
+  }, []);
+
+  useEffect(() => {
+    let frameId = 0;
+
+    const refreshLayout = () => {
+      window.cancelAnimationFrame(frameId);
+      frameId = window.requestAnimationFrame(() => {
+        setSidebarWidth((current) => clampSidebarWidthForViewport(current, window.innerWidth));
+        setLayoutRefreshNonce((current) => current + 1);
+      });
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        refreshLayout();
+      }
+    };
+
+    refreshLayout();
+    window.addEventListener("resize", refreshLayout);
+    window.addEventListener("focus", refreshLayout);
+    window.addEventListener("pageshow", refreshLayout);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.removeEventListener("resize", refreshLayout);
+      window.removeEventListener("focus", refreshLayout);
+      window.removeEventListener("pageshow", refreshLayout);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, []);
 
@@ -1366,6 +1464,19 @@ export function App() {
     return chatDetail.thread.turns.flatMap((turn) => turn.items.map((item) => ({ turnId: turn.id, item })));
   }, [chatDetail]);
 
+  const handleThreadCardKeyDown = (
+    event: React.KeyboardEvent<HTMLElement>,
+    chatId: string,
+    projectId: string
+  ) => {
+    if (event.key !== "Enter" && event.key !== " ") {
+      return;
+    }
+
+    event.preventDefault();
+    void loadChat(chatId, projectId);
+  };
+
   if (busy.boot) {
     return <main className="loading-screen">Loading Coordex...</main>;
   }
@@ -1374,6 +1485,7 @@ export function App() {
     <main
       ref={appShellRef}
       className="app-shell"
+      data-layout-refresh={layoutRefreshNonce}
       style={
         {
           "--sidebar-width": `${sidebarWidth}px`
@@ -1651,22 +1763,55 @@ export function App() {
           <div className="thread-tree">
             {selectedProject ? (
               chats.length ? (
-                chats.map((chat) => (
-                  <button
-                    key={chat.id}
-                    className={`thread-link ${chat.id === selectedChatId ? "selected" : ""}`}
-                    onClick={() => void loadChat(chat.id, chat.projectId)}
-                  >
-                    <div className="thread-link-row">
-                      <strong>{chat.title}</strong>
-                      <div className="thread-link-badges">
-                        {isPendingAgent(chat) ? <span className="pill pill-state-pending">not started</span> : null}
-                        <span className={`pill pill-kind-${chat.kind}`}>{chat.kind}</span>
+                chats.map((chat) => {
+                  const responsibility = describeChatResponsibility(chat);
+                  const showResponsibilityDetails = needsThreadResponsibilityDetails(responsibility);
+
+                  return (
+                    <article
+                      key={chat.id}
+                      className={`thread-link ${chat.id === selectedChatId ? "selected" : ""}`}
+                      role="button"
+                      tabIndex={0}
+                      aria-pressed={chat.id === selectedChatId}
+                      onClick={() => void loadChat(chat.id, chat.projectId)}
+                      onKeyDown={(event) => handleThreadCardKeyDown(event, chat.id, chat.projectId)}
+                    >
+                      <div className="thread-link-row">
+                        <strong title={chat.title}>{chat.title}</strong>
+                        <div className="thread-link-badges">
+                          {isPendingAgent(chat) ? <span className="pill pill-state-pending">not started</span> : null}
+                          <span className={`pill pill-kind-${chat.kind}`}>{chat.kind}</span>
+                        </div>
                       </div>
-                    </div>
-                    <span className="thread-link-responsibility">{describeChatResponsibility(chat)}</span>
-                  </button>
-                ))
+
+                      <div className="thread-link-meta">
+                        <span className="thread-link-responsibility" title={showResponsibilityDetails ? undefined : responsibility}>
+                          {responsibility}
+                        </span>
+                        {showResponsibilityDetails ? (
+                          <div className="board-hover-anchor thread-link-detail-anchor">
+                            <button
+                              className="thread-link-detail-button"
+                              type="button"
+                              aria-label={`Open full responsibility for ${chat.title}`}
+                              title="Open full responsibility"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                              }}
+                              onKeyDown={(event) => {
+                                event.stopPropagation();
+                              }}
+                            >
+                              <IconEllipsis />
+                            </button>
+                            {renderThreadResponsibilityPreviewCard(chat, responsibility)}
+                          </div>
+                        ) : null}
+                      </div>
+                    </article>
+                  );
+                })
               ) : (
                 <p className="empty-note">No chats yet. Use the fixed toolbar above to create one.</p>
               )
