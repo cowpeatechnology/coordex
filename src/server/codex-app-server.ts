@@ -245,6 +245,34 @@ export class CodexAppServerClient extends EventEmitter {
     };
   }
 
+  getReconciledLiveState(thread: CodexThread): LiveThreadState {
+    const current = this.getLiveState(thread.id);
+    const runningTurn = current.runningTurnId ? thread.turns.find((entry) => entry.id === current.runningTurnId) ?? null : null;
+
+    if (current.runningTurnId && (!runningTurn || runningTurn.status !== "inProgress")) {
+      const next = {
+        runningTurnId: null,
+        draftAssistantText: ""
+      };
+      this.liveThreadState.set(thread.id, next);
+      return next;
+    }
+
+    if (!current.runningTurnId) {
+      const latestTurn = thread.turns.at(-1) ?? null;
+      if (latestTurn?.status === "inProgress") {
+        const next = {
+          runningTurnId: latestTurn.id,
+          draftAssistantText: current.draftAssistantText
+        };
+        this.liveThreadState.set(thread.id, next);
+        return next;
+      }
+    }
+
+    return current;
+  }
+
   private async resumeThread(threadId: string, cwd: string): Promise<void> {
     if (this.loadedThreads.has(threadId)) {
       return;
@@ -336,6 +364,13 @@ export class CodexAppServerClient extends EventEmitter {
 
       child.once("exit", (code, signal) => {
         const message = `codex app-server exited (${code ?? "null"}, ${signal ?? "null"})`;
+        this.emit("notification", {
+          method: "coordex/app-server-exited",
+          params: {
+            code: code ?? null,
+            signal: signal ?? null
+          }
+        });
         for (const pending of this.pending.values()) {
           pending.reject(new Error(message));
         }
@@ -454,6 +489,18 @@ export class CodexAppServerClient extends EventEmitter {
         return;
       }
       case "turn/completed": {
+        const threadId = message.params?.threadId;
+        if (typeof threadId === "string") {
+          this.liveThreadState.set(threadId, {
+            runningTurnId: null,
+            draftAssistantText: ""
+          });
+        }
+        return;
+      }
+      case "turn/failed":
+      case "turn/cancelled":
+      case "turn/interrupted": {
         const threadId = message.params?.threadId;
         if (typeof threadId === "string") {
           this.liveThreadState.set(threadId, {

@@ -104,7 +104,7 @@ const getChatDetail = async (chatId: string): Promise<ChatDetail> => {
     project,
     chat: nextChat,
     thread,
-    liveState: codex.getLiveState(chat.threadId)
+    liveState: codex.getReconciledLiveState(thread)
   };
 };
 
@@ -572,6 +572,45 @@ app.get("/api/chats/:chatId", async (req, res) => {
     res.json(detail);
   } catch (error) {
     res.status(404).json({
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+});
+
+app.post("/api/chats/:chatId/archive", async (req, res) => {
+  try {
+    const chat = store.getChat(req.params.chatId);
+    if (!chat) {
+      res.status(404).json({ error: "Unknown chat." });
+      return;
+    }
+
+    const project = store.getProject(chat.projectId);
+    if (!project) {
+      res.status(404).json({ error: "Unknown project." });
+      return;
+    }
+
+    try {
+      await codex.archiveThread(chat.threadId);
+    } catch {
+      // Allow local archive cleanup to proceed even if the thread was already archived.
+    }
+
+    const removedChat = store.removeChat(chat.id);
+    if (removedChat?.kind === "agent") {
+      syncProjectAgentRegistry(project.rootPath, store.getChatsForProject(project.id));
+    }
+
+    sendEvent({
+      type: "state.selection",
+      payload: store.getSnapshot().selection
+    });
+
+    const bundle = await getProjectBundle(project.id);
+    res.json(bundle);
+  } catch (error) {
+    res.status(500).json({
       error: error instanceof Error ? error.message : String(error)
     });
   }

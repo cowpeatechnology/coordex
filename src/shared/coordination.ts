@@ -6,6 +6,22 @@ export function buildFeatureDispatchMessage(
   feature: CoordexPlanFeature
 ): string {
   const ownerRole = feature.ownerRole || "unassigned";
+  const normalizedOwnerRole = ownerRole.trim().toLowerCase();
+  const isSupervisorOwned = normalizedOwnerRole === "supervisor";
+  const replyTargetRole = isSupervisorOwned ? "human" : "supervisor";
+  const replyKind = isSupervisorOwned ? "decision" : "result";
+  const replyStatus = isSupervisorOwned ? "done" : "answered";
+  const responseRules = isSupervisorOwned
+    ? [
+        "- Because this subfunction is owned by supervisor, do not send a self-report back to supervisor.",
+        "- Complete any required plan or ledger updates before replying.",
+        '- If the subfunction is complete, reply with `kind: "decision"`, `status: "done"`, and `to_role: "human"`.',
+        '- If the subfunction cannot continue, reply with `kind: "blocker"`, `status: "blocked"`, and `to_role: "human"`.'
+      ]
+    : [
+        '- If another role is needed, use `kind: "handoff"` or `kind: "blocker"` instead of silently expanding scope.',
+        "- Keep strings concise and put paths or checks into `artifacts` and `validation`."
+      ];
 
   return [
     `[Coordex Structured Dispatch]`,
@@ -26,9 +42,9 @@ export function buildFeatureDispatchMessage(
     '  "protocol_version": "coordex-agent-io.v1",',
     `  "task_id": "${feature.id}",`,
     `  "from_role": "${ownerRole}",`,
-    '  "to_role": "supervisor",',
-    '  "kind": "result",',
-    '  "status": "answered",',
+    `  "to_role": "${replyTargetRole}",`,
+    `  "kind": "${replyKind}",`,
+    `  "status": "${replyStatus}",`,
     '  "summary": "one-line outcome",',
     '  "input": "what you were asked to do",',
     '  "expected_output": "what done looks like",',
@@ -45,7 +61,6 @@ export function buildFeatureDispatchMessage(
     "",
     "Rules:",
     "- Keep coordination inside this subfunction's scope.",
-    "- If another role is needed, use `kind: \"handoff\"` or `kind: \"blocker\"` instead of silently expanding scope.",
-    "- Keep strings concise and put paths or checks into `artifacts` and `validation`."
+    ...responseRules
   ].join("\n");
 }

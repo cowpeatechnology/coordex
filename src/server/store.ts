@@ -331,6 +331,21 @@ export class StateStore {
     return chat;
   }
 
+  removeChat(chatId: string): CoordexChat | undefined {
+    const index = this.state.chats.findIndex((chat) => chat.id === chatId);
+    if (index === -1) {
+      return undefined;
+    }
+
+    const [removed] = this.state.chats.splice(index, 1);
+    if (this.state.selection.chatId === chatId) {
+      this.state.selection.chatId = null;
+    }
+
+    this.persist();
+    return removed;
+  }
+
   setSelection(projectId: string | null, chatId: string | null): void {
     const now = isoNow();
 

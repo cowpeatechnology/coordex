@@ -212,6 +212,31 @@ function normalizeRoleName(value: string | null | undefined): string {
   return (value ?? "").trim().toLowerCase();
 }
 
+function isStoppedTurnStatus(status: string | null | undefined): boolean {
+  return status === "failed" || status === "cancelled" || status === "interrupted";
+}
+
+function isSettledTurnStatus(status: string | null | undefined): boolean {
+  return Boolean(status && status !== "inProgress");
+}
+
+function getLatestTurn(detail: ChatDetail | null | undefined) {
+  return detail?.thread.turns.at(-1) ?? null;
+}
+
+function describeStoppedTurnStatus(status: string | null | undefined): string {
+  switch (status) {
+    case "failed":
+      return "failed";
+    case "cancelled":
+      return "cancelled";
+    case "interrupted":
+      return "interrupted";
+    default:
+      return "stopped";
+  }
+}
+
 function truncateText(value: string, maxLength: number): string {
   const trimmed = value.trim();
   if (!trimmed) {
@@ -496,6 +521,7 @@ export function App() {
   const threadScrollRef = useRef<HTMLDivElement | null>(null);
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
   const liveRefreshInFlightRef = useRef(false);
+  const completedRefreshInFlightRef = useRef(false);
 
   const selectedProject = useMemo(() => {
     return projects.find((project) => project.id === selectedProjectId) ?? null;
@@ -548,6 +574,19 @@ export function App() {
     setDraftAssistantText(detail.liveState.draftAssistantText);
     setRunningTurnId(detail.liveState.runningTurnId);
   };
+
+  const latestStoppedTurn = useMemo(() => {
+    if (!chatDetail || runningTurnId) {
+      return null;
+    }
+
+    const latestTurn = chatDetail.thread.turns.at(-1) ?? null;
+    if (!latestTurn || !isStoppedTurnStatus(latestTurn.status)) {
+      return null;
+    }
+
+    return latestTurn;
+  }, [chatDetail, runningTurnId]);
 
   const closeProjectForm = () => {
     setProjectFormOpen(false);
@@ -763,6 +802,24 @@ export function App() {
 
       const method = payload.payload.method;
       const params = payload.payload.params;
+
+      if (method === "coordex/app-server-exited") {
+        const code = typeof params.code === "number" ? params.code : null;
+        const signal = typeof params.signal === "string" ? params.signal : null;
+        setNotice({
+          tone: "error",
+          message: `Coordex lost its Codex app-server connection (${code ?? "null"}, ${signal ?? "null"}). Refreshing thread state.`
+        });
+
+        if (chatDetail) {
+          setRunningTurnId(null);
+          setDraftAssistantText("");
+          void loadChat(chatDetail.chat.id, chatDetail.project.id, false).catch(() => undefined);
+          void loadProject(chatDetail.project.id, false, { includeBoard: true }).catch(() => undefined);
+        }
+        return;
+      }
+
       const threadId = typeof params.threadId === "string" ? params.threadId : null;
       const isCurrentThread = Boolean(chatDetail && threadId === chatDetail.chat.threadId);
       const isSelectedProjectThread = Boolean(threadId && chats.some((chat) => chat.threadId === threadId));
@@ -803,6 +860,12 @@ export function App() {
       ) {
         setRunningTurnId(null);
         setDraftAssistantText("");
+        if (method !== "turn/completed") {
+          setNotice({
+            tone: "error",
+            message: `Current thread stopped with status "${method.replace("turn/", "")}".`
+          });
+        }
         void loadChat(chatDetail.chat.id, chatDetail.project.id, false);
         void loadProject(chatDetail.project.id, false, { includeBoard: true });
         return;
@@ -874,6 +937,55 @@ export function App() {
       window.clearInterval(intervalId);
     };
   }, [chatDetail?.chat.id, chatDetail?.project.id, runningTurnId]);
+
+  useEffect(() => {
+    if (!chatDetail || runningTurnId) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const refreshCompletedThread = async () => {
+      if (cancelled || completedRefreshInFlightRef.current) {
+        return;
+      }
+
+      completedRefreshInFlightRef.current = true;
+
+      try {
+        const detail = await api.getChat(chatDetail.chat.id);
+        if (cancelled) {
+          return;
+        }
+
+        const currentLatestTurn = getLatestTurn(chatDetail);
+        const nextLatestTurn = getLatestTurn(detail);
+        const hasNewSettledTurn =
+          Boolean(nextLatestTurn && isSettledTurnStatus(nextLatestTurn.status)) &&
+          (!currentLatestTurn ||
+            nextLatestTurn.id !== currentLatestTurn.id ||
+            nextLatestTurn.status !== currentLatestTurn.status ||
+            detail.thread.updatedAt !== chatDetail.thread.updatedAt);
+
+        if (hasNewSettledTurn) {
+          applyChatDetail(detail);
+        }
+      } catch {
+        // Ignore passive refresh failures and keep the current thread snapshot.
+      } finally {
+        completedRefreshInFlightRef.current = false;
+      }
+    };
+
+    const intervalId = window.setInterval(() => {
+      void refreshCompletedThread();
+    }, 2000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [chatDetail, runningTurnId]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -1351,6 +1463,8 @@ export function App() {
       ? "Submitting message to Codex..."
       : isTurnRunning
         ? "Codex is thinking..."
+        : latestStoppedTurn
+          ? `Last turn ${describeStoppedTurnStatus(latestStoppedTurn.status)}`
         : `Last updated ${formatTime(chatDetail.thread.updatedAt)}`
     : "No thread selected";
 
@@ -2014,6 +2128,15 @@ export function App() {
                       <small>{runningTurnId?.slice(0, 8) ?? "live"}</small>
                     </header>
                     <pre>{draftAssistantText}</pre>
+                  </article>
+                ) : null}
+                {latestStoppedTurn ? (
+                  <article className="message-card message-system">
+                    <header>
+                      <span>Coordex</span>
+                      <small>{latestStoppedTurn.id.slice(0, 8)}</small>
+                    </header>
+                    <pre>{`The latest turn ${describeStoppedTurnStatus(latestStoppedTurn.status)}. This thread is no longer running.`}</pre>
                   </article>
                 ) : null}
               </>

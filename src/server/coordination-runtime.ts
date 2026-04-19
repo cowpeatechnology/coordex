@@ -127,6 +127,10 @@ function buildRoleRelayMessage(envelope: StructuredCoordinationEnvelope, roleNam
   ].join("\n");
 }
 
+function isFinalAcceptanceDecision(envelope: StructuredCoordinationEnvelope): boolean {
+  return envelope.kind === "decision" && envelope.status === "done";
+}
+
 export class AutoCoordinationRuntime {
   private readonly processedTurnIds = new Set<string>();
 
@@ -181,6 +185,7 @@ export class AutoCoordinationRuntime {
       return;
     }
 
+    const currentRole = normalizeRoleName(chat.roleName);
     const targetRole = normalizeRoleName(envelope.to_role);
     const targetChat =
       targetRole && targetRole !== "human"
@@ -188,10 +193,25 @@ export class AutoCoordinationRuntime {
             .getChatsForProject(project.id)
             .find((candidate) => candidate.kind === "agent" && normalizeRoleName(candidate.roleName) === targetRole) ?? null
         : null;
+    const isFinalDecision = isFinalAcceptanceDecision(envelope);
+    const isSelfTarget = Boolean(targetChat && targetChat.id === chat.id);
+    const shouldRelaySupervisorSelfReview =
+      currentRole === "supervisor" &&
+      isSelfTarget &&
+      envelope.kind === "result" &&
+      envelope.status !== "done";
     const selectedChat = targetChat ?? chat;
 
     const nextRunState =
-      targetRole === "human" ? (envelope.kind === "blocker" || envelope.status === "blocked" ? "blocked" : "idle") : targetChat ? "running" : "blocked";
+      isFinalDecision
+        ? "idle"
+        : targetRole === "human"
+          ? envelope.kind === "blocker" || envelope.status === "blocked"
+            ? "blocked"
+            : "idle"
+          : targetChat
+            ? "running"
+            : "blocked";
 
     const board = updateProjectBoardFeature(project.rootPath, envelope.task_id, (feature) => {
       feature.coordinations.push({
@@ -209,13 +229,19 @@ export class AutoCoordinationRuntime {
       });
 
       if (!feature.done) {
-        feature.runState = nextRunState;
+        if (isFinalDecision) {
+          feature.done = true;
+          feature.runState = "idle";
+        } else {
+          feature.runState = nextRunState;
+        }
       }
     });
     this.deps.onBoardChanged(project.id, board);
     this.deps.onSelectionChanged(project.id, selectedChat.id);
 
-    if (!targetChat) {
+    const shouldRelayToTarget = Boolean(targetChat && (!isSelfTarget || shouldRelaySupervisorSelfReview) && !isFinalDecision);
+    if (!shouldRelayToTarget || !targetChat) {
       return;
     }
 
