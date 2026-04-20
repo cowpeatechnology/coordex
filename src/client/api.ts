@@ -1,6 +1,7 @@
 import type {
   BootstrapPayload,
   ChatDetail,
+  CodexExecutionProfile,
   CoordexProject,
   CoordexChat,
   CoordexProjectBoard,
@@ -35,6 +36,16 @@ export const api = {
   updateProject(projectId: string, input: { name: string; rootPath: string }): Promise<ProjectBundle> {
     return fetch(`/api/projects/${projectId}`, {
       method: "PATCH",
+      headers: jsonHeaders,
+      body: JSON.stringify(input)
+    }).then(unwrap);
+  },
+  updateExecutionProfile(
+    projectId: string,
+    input: { model: string; reasoningEffort: string }
+  ): Promise<{ executionProfile: CodexExecutionProfile }> {
+    return fetch(`/api/projects/${projectId}/execution-profile`, {
+      method: "PUT",
       headers: jsonHeaders,
       body: JSON.stringify(input)
     }).then(unwrap);
@@ -124,6 +135,7 @@ export const api = {
 export type {
   BootstrapPayload,
   ChatDetail,
+  CodexExecutionProfile,
   CoordexProject,
   CoordexChat,
   CoordexProjectBoard,

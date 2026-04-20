@@ -1223,6 +1223,31 @@ textarea {
   white-space: nowrap;
 }
 
+.composer-profile-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.composer-profile-select {
+  width: auto;
+  min-width: 0;
+  min-height: 38px;
+  padding: 0 30px 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 252, 247, 0.84);
+  color: var(--muted);
+  font-family: "SFMono-Regular", "Cascadia Mono", "IBM Plex Mono", "Menlo", monospace;
+  font-size: 0.78rem;
+  line-height: 1;
+}
+
+.composer-profile-select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .composer-compact-button svg {
   width: 14px;
   height: 14px;

@@ -29,7 +29,7 @@ import { AutoCoordinationRuntime } from "./coordination-runtime.js";
 import { syncProjectAgentRegistry } from "./project-agent-doc.js";
 import { archiveProjectBoardPlan, loadProjectBoard, saveProjectBoard } from "./project-board.js";
 import { ensureProjectInitializationPackage } from "./project-bootstrap.js";
-import { readCodexExecutionProfileForProject } from "./project-codex-profile.js";
+import { readCodexExecutionProfileForProject, writeCodexExecutionProfileForProject } from "./project-codex-profile.js";
 import { StateStore } from "./store.js";
 import { listAgentProjectTemplates } from "./template-loader.js";
 
@@ -573,6 +573,39 @@ app.get("/api/chats/:chatId", async (req, res) => {
     res.json(detail);
   } catch (error) {
     res.status(404).json({
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+});
+
+app.put("/api/projects/:projectId/execution-profile", async (req, res) => {
+  try {
+    const project = store.getProject(req.params.projectId);
+    if (!project) {
+      res.status(404).json({ error: "Unknown project." });
+      return;
+    }
+
+    const model = typeof req.body?.model === "string" ? req.body.model.trim() : "";
+    const reasoningEffort = typeof req.body?.reasoningEffort === "string" ? req.body.reasoningEffort.trim() : "";
+
+    if (!model || !reasoningEffort) {
+      res.status(400).json({
+        error: "Both model and reasoningEffort are required."
+      });
+      return;
+    }
+
+    const executionProfile = writeCodexExecutionProfileForProject(project.rootPath, {
+      model,
+      reasoningEffort
+    });
+
+    res.json({
+      executionProfile
+    });
+  } catch (error) {
+    res.status(400).json({
       error: error instanceof Error ? error.message : String(error)
     });
   }

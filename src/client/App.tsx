@@ -40,6 +40,20 @@ const APP_SHELL_HORIZONTAL_PADDING = 36;
 const APP_SHELL_TOTAL_COLUMN_GAP = 24;
 const APP_SHELL_SPLITTER_WIDTH = 12;
 const MIN_THREAD_STAGE_WIDTH = 360;
+const EXECUTION_MODEL_OPTIONS = ["gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"];
+const EXECUTION_REASONING_OPTIONS = ["none", "low", "medium", "high", "xhigh"];
+
+function trimOrEmpty(value: string | null | undefined): string {
+  return value?.trim() || "";
+}
+
+function withCurrentOption(options: string[], current: string): string[] {
+  if (!current || options.includes(current)) {
+    return options;
+  }
+
+  return [current, ...options];
+}
 
 function formatTime(value: string | number | null | undefined): string {
   if (!value) {
@@ -658,6 +672,7 @@ export function App() {
     project: false,
     chat: false,
     agent: false,
+    profile: false,
     send: false,
     compact: false,
     login: false,
@@ -680,6 +695,16 @@ export function App() {
   const selectedAgentProjectTemplate = useMemo(() => {
     return agentProjectTemplates.find((template) => template.key === agentProjectTemplateKey) ?? agentProjectTemplates[0] ?? null;
   }, [agentProjectTemplateKey, agentProjectTemplates]);
+  const selectedExecutionModel = trimOrEmpty(chatDetail?.executionProfile.model) || "gpt-5.4";
+  const selectedReasoningEffort = trimOrEmpty(chatDetail?.executionProfile.reasoningEffort) || "xhigh";
+  const availableExecutionModels = useMemo(
+    () => withCurrentOption(EXECUTION_MODEL_OPTIONS, selectedExecutionModel),
+    [selectedExecutionModel]
+  );
+  const availableReasoningEfforts = useMemo(
+    () => withCurrentOption(EXECUTION_REASONING_OPTIONS, selectedReasoningEffort),
+    [selectedReasoningEffort]
+  );
 
   const chats = projectBundle?.chats ?? [];
   const activePlan = projectBoard?.activePlan ?? null;
@@ -1633,6 +1658,71 @@ export function App() {
     await submitMessageToChat(chatDetail.chat.id, chatDetail.project.id, messageText);
   };
 
+  const persistExecutionProfile = async (nextPartial: { model?: string; reasoningEffort?: string }) => {
+    if (!chatDetail) {
+      return;
+    }
+
+    const projectId = chatDetail.project.id;
+    const nextModel = trimOrEmpty(nextPartial.model) || selectedExecutionModel;
+    const nextReasoningEffort = trimOrEmpty(nextPartial.reasoningEffort) || selectedReasoningEffort;
+    const previousProfile = chatDetail.executionProfile;
+
+    setBusy((current) => ({ ...current, profile: true }));
+    setChatDetail((current) => {
+      if (!current || current.project.id !== projectId) {
+        return current;
+      }
+
+      return {
+        ...current,
+        executionProfile: {
+          model: nextModel,
+          reasoningEffort: nextReasoningEffort
+        }
+      };
+    });
+
+    try {
+      const response = await api.updateExecutionProfile(projectId, {
+        model: nextModel,
+        reasoningEffort: nextReasoningEffort
+      });
+
+      setChatDetail((current) => {
+        if (!current || current.project.id !== projectId) {
+          return current;
+        }
+
+        return {
+          ...current,
+          executionProfile: response.executionProfile
+        };
+      });
+      setNotice({
+        tone: "info",
+        message: `Saved execution profile for future turns: ${response.executionProfile.model ?? nextModel} · ${response.executionProfile.reasoningEffort ?? nextReasoningEffort}.`
+      });
+    } catch (error) {
+      setChatDetail((current) => {
+        if (!current || current.project.id !== projectId) {
+          return current;
+        }
+
+        return {
+          ...current,
+          executionProfile: previousProfile
+        };
+      });
+      setNotice({
+        tone: "error",
+        message: error instanceof Error ? error.message : String(error)
+      });
+    } finally {
+      setBusy((current) => ({ ...current, profile: false }));
+    }
+  };
+
   const handleCompactChat = async () => {
     if (!chatDetail) {
       return;
@@ -2377,9 +2467,37 @@ export function App() {
                 <span className="composer-profile-chip" title={getContextWindowUsageTitle(chatDetail)}>
                   {formatContextWindowUsage(chatDetail)}
                 </span>
-                <span className="composer-profile-chip" title="Current thread model and reasoning profile">
-                  {formatExecutionProfile(chatDetail)}
-                </span>
+                <div
+                  className="composer-profile-controls"
+                  title="Writes the selected project profile to .codex/config.toml. Future thread starts and turns use this model and reasoning effort."
+                >
+                  <select
+                    className="composer-profile-select"
+                    aria-label="Model"
+                    value={selectedExecutionModel}
+                    onChange={(event) => void persistExecutionProfile({ model: event.target.value })}
+                    disabled={!chatDetail || busy.profile}
+                  >
+                    {availableExecutionModels.map((model) => (
+                      <option key={model} value={model}>
+                        {model}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    className="composer-profile-select"
+                    aria-label="Reasoning effort"
+                    value={selectedReasoningEffort}
+                    onChange={(event) => void persistExecutionProfile({ reasoningEffort: event.target.value })}
+                    disabled={!chatDetail || busy.profile}
+                  >
+                    {availableReasoningEfforts.map((effort) => (
+                      <option key={effort} value={effort}>
+                        {effort}
+                      </option>
+                    ))}
+                  </select>
+                </div>
                 <button
                   className="secondary-button composer-compact-button"
                   type="button"
