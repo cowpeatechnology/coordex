@@ -3,6 +3,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import readline from "node:readline";
 
 import type { AuthSummary, CodexThread } from "../shared/types.js";
+import { readCodexExecutionProfileForCwd } from "./project-codex-profile.js";
 
 type JsonRpcSuccess = {
   jsonrpc: "2.0";
@@ -55,6 +56,28 @@ const DEFAULT_TURN_START = {
 } as const;
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+function countCompactionItems(thread: CodexThread): number {
+  return thread.turns.reduce(
+    (count, turn) => count + turn.items.filter((item) => item.type === "compaction").length,
+    0
+  );
+}
+
+function formatThreadStatus(status: CodexThread["status"]): string {
+  if (typeof status === "string") {
+    return status;
+  }
+
+  if (status && typeof status === "object") {
+    const type = Reflect.get(status, "type");
+    if (typeof type === "string") {
+      return type;
+    }
+  }
+
+  return "unknown";
+}
 
 export class CodexAppServerClient extends EventEmitter {
   private process: ChildProcessWithoutNullStreams | null = null;
@@ -159,9 +182,11 @@ export class CodexAppServerClient extends EventEmitter {
   }
 
   async createThread(cwd: string, title: string): Promise<{ threadId: string }> {
+    const executionProfile = readCodexExecutionProfileForCwd(cwd);
     const response = (await this.request("thread/start", {
       cwd,
-      ...DEFAULT_THREAD_START
+      ...DEFAULT_THREAD_START,
+      ...(executionProfile.model ? { model: executionProfile.model } : {})
     })) as {
       thread: { id: string };
     };
@@ -184,6 +209,48 @@ export class CodexAppServerClient extends EventEmitter {
     });
   }
 
+  async compactThread(
+    threadId: string,
+    cwd: string,
+    options?: {
+      timeoutMs?: number;
+      pollIntervalMs?: number;
+    }
+  ): Promise<CodexThread> {
+    const timeoutMs = options?.timeoutMs ?? 20_000;
+    const pollIntervalMs = options?.pollIntervalMs ?? 800;
+    const baseline = await this.readThread(threadId);
+    const baselineCompactionCount = countCompactionItems(baseline);
+
+    await this.resumeThread(threadId, cwd);
+    await this.request("thread/compact/start", {
+      threadId
+    });
+
+    const deadline = Date.now() + timeoutMs;
+    let latestThread = baseline;
+
+    while (Date.now() < deadline) {
+      latestThread = await this.readThread(threadId);
+
+      if (countCompactionItems(latestThread) > baselineCompactionCount) {
+        return latestThread;
+      }
+
+      if (
+        latestThread.updatedAt !== baseline.updatedAt ||
+        latestThread.turns.length !== baseline.turns.length ||
+        formatThreadStatus(latestThread.status) !== formatThreadStatus(baseline.status)
+      ) {
+        return latestThread;
+      }
+
+      await sleep(pollIntervalMs);
+    }
+
+    return latestThread;
+  }
+
   async interruptTurn(threadId: string, turnId: string): Promise<void> {
     await this.request("turn/interrupt", {
       threadId,
@@ -193,11 +260,14 @@ export class CodexAppServerClient extends EventEmitter {
 
   async sendMessage(threadId: string, cwd: string, text: string): Promise<{ turnId: string }> {
     await this.resumeThread(threadId, cwd);
+    const executionProfile = readCodexExecutionProfileForCwd(cwd);
 
     const response = (await this.request("turn/start", {
       ...DEFAULT_TURN_START,
       threadId,
       cwd,
+      ...(executionProfile.model ? { model: executionProfile.model } : {}),
+      ...(executionProfile.reasoningEffort ? { effort: executionProfile.reasoningEffort } : {}),
       input: [
         {
           type: "text",
@@ -501,6 +571,16 @@ export class CodexAppServerClient extends EventEmitter {
       case "turn/failed":
       case "turn/cancelled":
       case "turn/interrupted": {
+        const threadId = message.params?.threadId;
+        if (typeof threadId === "string") {
+          this.liveThreadState.set(threadId, {
+            runningTurnId: null,
+            draftAssistantText: ""
+          });
+        }
+        return;
+      }
+      case "thread/compacted": {
         const threadId = message.params?.threadId;
         if (typeof threadId === "string") {
           this.liveThreadState.set(threadId, {

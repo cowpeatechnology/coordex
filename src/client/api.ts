@@ -100,6 +100,12 @@ export const api = {
       body: JSON.stringify(input)
     }).then(unwrap);
   },
+  compactChat(chatId: string): Promise<ChatDetail> {
+    return fetch(`/api/chats/${chatId}/compact`, {
+      method: "POST",
+      headers: jsonHeaders
+    }).then(unwrap);
+  },
   setSelection(input: { projectId: string | null; chatId: string | null }): Promise<{ ok: boolean }> {
     return fetch("/api/selection", {
       method: "POST",

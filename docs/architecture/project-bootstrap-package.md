@@ -1,6 +1,6 @@
 # Project Bootstrap Package
 
-This document defines the minimum package Coordex now writes into a newly registered local project root when the target files do not already exist.
+This document defines the minimum package Coordex now copies from an internal template source into a newly registered local project root when the target files do not already exist.
 
 The point is not to auto-design the project. The point is to ensure a brand new project can immediately use the Coordex workflow without re-learning the same structure from zero.
 
@@ -20,7 +20,11 @@ Coordex should reduce that setup cost.
 
 ## What gets created
 
-When a project root is registered, Coordex now creates missing versions of:
+When a project root is registered, Coordex now copies missing files from `templates/<template-key>/bootstrap/` and syncs the root workflow block in `AGENTS.md`.
+
+The default template today is `templates/game-development/`.
+
+That bootstrap currently includes:
 
 - `AGENTS.md`
 - `.codex/config.toml`
@@ -38,13 +42,15 @@ When a project root is registered, Coordex now creates missing versions of:
 - `docs/templates/worker-handoff-template.md`
 - `docs/templates/thread-message-template.md`
 
-Coordex also ensures the plan files under `.coordex/` exist through the project-board layer:
+Coordex also ensures the plan files under `.coordex/` exist as part of the template baseline and continues to maintain them through the project-board layer:
 
 - `.coordex/current-plan.md`
 - `.coordex/plan-history.md`
 - `.coordex/project-board.json`
 
-When role agents are created, Coordex also creates missing role-state files:
+The bootstrap baseline already includes role-state files for the default template roles.
+
+When extra custom role agents are created, Coordex also creates a missing matching role-state file from the selected template's custom scaffold:
 
 - `docs/project/role-state/README.md`
 - `docs/project/role-state/<role>.md`
@@ -63,11 +69,11 @@ It should hold:
 - stable cross-role rules
 - the durable Coordex role roster block
 
-The generated file is only a placeholder until the human fills in real facts.
+The templated file is only a placeholder until the human fills in real facts.
 
 ### `.codex` SessionStart layer
 
-This is the context-retention reminder layer.
+This is the context-retention reminder layer, sourced from the project template rather than assembled inline in product code.
 
 Coordex enables project-scoped hooks and adds a `SessionStart` script that re-surfaces a compact reminder from:
 

@@ -76,6 +76,7 @@ Current project layout:
 - `src/client/`: React UI
 - `src/server/`: Express bridge and Codex app-server integration
 - `src/shared/`: shared types and agent template metadata
+- `templates/`: reusable project bootstrap and role-template sources
 
 ## 5. Non-negotiable product rules
 
@@ -93,7 +94,7 @@ Current project layout:
 Supported today:
 
 - local project registration
-- project registration seeds a minimal bootstrap package for missing files under the target root, including root `AGENTS.md`, project docs, and project-scoped `.codex` SessionStart hook scaffolding
+- project registration seeds missing files from an internal project template under `templates/`, plus a synced Coordex workflow block in the target root `AGENTS.md`
 - Codex auth status read and ChatGPT login start
 - project-scoped thread discovery by `cwd` prefix
 - root chat creation
@@ -126,7 +127,7 @@ The confirmed operating model is documented in [docs/architecture/visible-multi-
 Current default role layout:
 
 - root directory: `Agents/`
-- default template: `game-development`
+- default template: `2d-cocos-creator-game-development`
 - default roles:
   - `supervisor`
   - `engineer`
@@ -150,6 +151,7 @@ Role creation rules:
 - direct peer coordination is allowed only inside an already active subfunction; task start, major scope changes, and acceptance still belong to the supervisor or human
 - role-to-role and role-to-supervisor coordination should use the structured contract documented in [docs/process/structured-agent-communication-protocol.md](/Users/mawei/MyWork/coordex/docs/process/structured-agent-communication-protocol.md) instead of drifting into unconstrained prose
 - role-specific mission, ownership, and handoff rules belong in `Agents/<role>/AGENTS.md`
+- reusable bootstrap docs, role handbooks, SessionStart hook content, and root `AGENTS.md` workflow blocks belong under `templates/<template-key>/`, not as hardcoded strings in Coordex application logic
 - avoid `AGENTS.override.md` unless same-directory replacement semantics are explicitly required
 - the initialization prompt should only bootstrap the role by pointing it at the already-loaded instruction chain plus a small read-only authority-doc set, then confirm readiness
 - root chats are temporary project-root conversations and are not part of the durable role roster
@@ -182,6 +184,13 @@ If moving this repo into a clean standalone directory, preserve:
 - Browser validation for this repo must follow [docs/process/dedicated-browser-workflow.md](/Users/mawei/MyWork/coordex/docs/process/dedicated-browser-workflow.md).
 - Keep integration logic in the server layer explicit; avoid burying app-server assumptions inside UI code.
 - Treat `output/` as disposable local artifacts, not source.
+- Apply the code-vs-template boundary on every multi-agent bug or workflow bug:
+  - if the issue is in UI, thread lifecycle, synchronization, parsing, persistence, browser validation, or any Coordex-owned runtime data surface, fix Coordex product code
+  - if the issue is that a role misunderstood its charter, wrote the wrong plan format, followed the wrong coordination protocol, or lost a durable workflow rule after compaction or resume, fix the template files or template hook content instead of hardcoding a behavior patch into Coordex
+  - if the issue exists only in one live project's current state, fix that project's runtime docs or state first, then decide whether the reusable template source also needs the same improvement
+- Do not patch Coordex application code merely to compensate for a weak role template.
+- Do not leave a reusable template-side fix only inside one live project; if the fix should apply to future projects, propagate it back into Coordex's template source.
+- Keep the deeper rationale in [docs/architecture/coordex-code-vs-template-boundary.md](/Users/mawei/MyWork/coordex/docs/architecture/coordex-code-vs-template-boundary.md), but treat the rules above as the always-on operating default for this repo.
 
 ## 10. Practical defaults
 

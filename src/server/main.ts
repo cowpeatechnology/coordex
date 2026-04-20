@@ -29,7 +29,9 @@ import { AutoCoordinationRuntime } from "./coordination-runtime.js";
 import { syncProjectAgentRegistry } from "./project-agent-doc.js";
 import { archiveProjectBoardPlan, loadProjectBoard, saveProjectBoard } from "./project-board.js";
 import { ensureProjectInitializationPackage } from "./project-bootstrap.js";
+import { readCodexExecutionProfileForProject } from "./project-codex-profile.js";
 import { StateStore } from "./store.js";
+import { listAgentProjectTemplates } from "./template-loader.js";
 
 const PORT = Number(process.env.COORDEX_PORT ?? 4318);
 const app = express();
@@ -104,6 +106,7 @@ const getChatDetail = async (chatId: string): Promise<ChatDetail> => {
     project,
     chat: nextChat,
     thread,
+    executionProfile: readCodexExecutionProfileForProject(project.rootPath),
     liveState: codex.getReconciledLiveState(thread)
   };
 };
@@ -180,6 +183,7 @@ app.get("/api/bootstrap", async (_req, res) => {
   const snapshot = store.getSnapshot();
   const payload: BootstrapPayload = {
     auth: await readAuth(),
+    templates: listAgentProjectTemplates(),
     projects: store.listProjects(),
     selection: snapshot.selection
   };
@@ -493,21 +497,17 @@ app.post("/api/projects/:projectId/agents", async (req, res) => {
     ensureProjectInitializationPackage(project.rootPath, {
       projectName: project.name,
       projectTemplate: workspace.projectTemplate,
-      roleStateSeeds: [
-        ...workspace.projectTemplate.roles.map((role) => ({
-          key: role.directoryName,
-          label: role.label,
-          purpose: role.description
-        })),
-        {
-          key: workspace.roleDirectory.split("/").at(-1) || workspace.roleName,
-          label: workspace.roleName,
-          purpose:
-            (typeof req.body?.rolePurpose === "string" && req.body.rolePurpose.trim()) ||
-            workspace.roleTemplate?.description ||
-            "Role-specific operating notes for this directory."
-        }
-      ]
+      extraRoleStateSeeds: workspace.roleTemplate
+        ? []
+        : [
+            {
+              key: workspace.roleDirectory.split("/").at(-1) || workspace.roleName,
+              label: workspace.roleName,
+              purpose:
+                (typeof req.body?.rolePurpose === "string" && req.body.rolePurpose.trim()) ||
+                "Role-specific operating notes for this directory."
+            }
+          ]
     });
 
     const thread = await codex.createThread(workspace.cwd, workspace.chatTitle);
@@ -609,6 +609,39 @@ app.post("/api/chats/:chatId/archive", async (req, res) => {
 
     const bundle = await getProjectBundle(project.id);
     res.json(bundle);
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : String(error)
+    });
+  }
+});
+
+app.post("/api/chats/:chatId/compact", async (req, res) => {
+  try {
+    const chat = store.getChat(req.params.chatId);
+    if (!chat) {
+      res.status(404).json({ error: "Unknown chat." });
+      return;
+    }
+
+    const project = store.getProject(chat.projectId);
+    if (!project) {
+      res.status(404).json({ error: "Unknown project." });
+      return;
+    }
+
+    const currentDetail = await getChatDetail(chat.id);
+    const latestTurn = currentDetail.thread.turns.at(-1) ?? null;
+    if (currentDetail.liveState.runningTurnId || latestTurn?.status === "inProgress") {
+      res.status(409).json({
+        error: "Cannot compact a thread while a turn is still running."
+      });
+      return;
+    }
+
+    await codex.compactThread(chat.threadId, chat.cwd);
+    const detail = await getChatDetail(chat.id);
+    res.json(detail);
   } catch (error) {
     res.status(500).json({
       error: error instanceof Error ? error.message : String(error)

@@ -1,0 +1,63 @@
+{
+  "key": "game-development",
+  "label": "Game Development",
+  "description": "Visible multi-agent scaffold for browser-debuggable game projects with supervisor-led planning and role-based execution.",
+  "directoryName": "Agents",
+  "customRoleInstructionTemplatePath": "agent-files/Agents/_custom/AGENTS.md",
+  "customRoleStateTemplatePath": "scaffolds/custom-role-state.md",
+  "sharedStartupDocCandidates": [
+    "docs/project/project-method.md",
+    ".coordex/current-plan.md",
+    "docs/project/decision-log.md",
+    "docs/process/structured-agent-communication-protocol.md",
+    "docs/process/engineering-standards.md",
+    "docs/process/development-loop.md",
+    "docs/project/delivery-ledger.md"
+  ],
+  "roles": [
+    {
+      "key": "supervisor",
+      "label": "supervisor",
+      "directoryName": "supervisor",
+      "description": "Product owner and project coordinator. Owns milestone planning, routing, and final acceptance.",
+      "defaultChatTitle": "supervisor",
+      "startupDocCandidates": [
+        "docs/project/role-state/supervisor.md",
+        "docs/process/thread-conversation-protocol.md",
+        "docs/project/thread-conversation-ledger.md",
+        "docs/templates/supervisor-work-order-template.md",
+        "docs/templates/worker-handoff-template.md",
+        "docs/templates/thread-message-template.md"
+      ]
+    },
+    {
+      "key": "engineer",
+      "label": "engineer",
+      "directoryName": "engineer",
+      "description": "Technical architecture, implementation, integration, debugging, and technical validation.",
+      "defaultChatTitle": "engineer",
+      "startupDocCandidates": [
+        "docs/project/role-state/engineer.md",
+        "docs/templates/worker-handoff-template.md",
+        "docs/process/dedicated-browser-workflow.md",
+        "docs/process/browser-runtime-workflow.md",
+        "docs/architecture/client-structure.md",
+        "docs/architecture/server-structure.md"
+      ]
+    },
+    {
+      "key": "art_asset_producer",
+      "label": "art_asset_producer",
+      "directoryName": "art_asset_producer",
+      "description": "Visual direction, asset planning, and SVG or image production for assigned milestones.",
+      "defaultChatTitle": "art_asset_producer",
+      "startupDocCandidates": [
+        "docs/project/role-state/art_asset_producer.md",
+        "docs/templates/worker-handoff-template.md",
+        "docs/templates/thread-message-template.md",
+        "docs/process/dedicated-browser-workflow.md",
+        "docs/architecture/client-structure.md"
+      ]
+    }
+  ]
+}

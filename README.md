@@ -18,11 +18,13 @@ It exists to support visible, role-oriented coordination for local Codex workspa
 
 ## Project bootstrap package
 
-When a local filesystem root is first registered as a Coordex project, Coordex now bootstraps a minimal checked-in methodology package if the files do not already exist.
+When a local filesystem root is first registered as a Coordex project, Coordex now bootstraps a minimal checked-in methodology package from an internal template directory if the files do not already exist.
 
 The intent is not to invent project truth automatically. The intent is to make a brand new project immediately usable with visible role coordination instead of leaving every project to rediscover the same scaffolding from scratch.
 
-The bootstrap package currently creates missing versions of:
+The default template currently lives under `templates/game-development/`.
+
+Coordex copies or syncs missing versions of:
 
 - root `AGENTS.md`
 - `.codex/config.toml`
@@ -41,12 +43,12 @@ The bootstrap package currently creates missing versions of:
 - `docs/templates/worker-handoff-template.md`
 - `docs/templates/thread-message-template.md`
 
-Role-state files under `docs/project/role-state/` are added when role agents are created, so durable role-local working state has a canonical on-disk location instead of drifting back into chat history.
+Role-state files under `docs/project/role-state/` are part of the template baseline for default roles. When a custom role agent is created, Coordex adds a matching missing role-state file from the selected template's custom-role scaffold so durable role-local working state has a canonical on-disk location instead of drifting back into chat history.
 
 Important constraints:
 
 - Coordex only writes files that are missing. It does not overwrite an existing project's docs.
-- The generated files are scaffolding, not authoritative product truth.
+- The template files are scaffolding, not authoritative product truth.
 - The human still needs to fill in real project identity, stack, directories, debug path, and current goal.
 - The supervisor remains responsible for drafting the real current plan before dispatching implementation work.
 - In the default operating model, the supervisor should not swallow worker-owned implementation itself; it should plan first and route engineer or art work to the matching role.
@@ -74,6 +76,7 @@ Official references:
 - [Local validation of root and child `AGENTS.md` loading](/Users/mawei/MyWork/coordex/docs/process/agents-root-discovery-validation.md)
 - [Visible multi-agent operating model](/Users/mawei/MyWork/coordex/docs/architecture/visible-multi-agent-operating-model.md)
 - [Agent initialization model](/Users/mawei/MyWork/coordex/docs/architecture/agent-initialization-model.md)
+- [Coordex code vs template boundary](/Users/mawei/MyWork/coordex/docs/architecture/coordex-code-vs-template-boundary.md)
 - [Project bootstrap package](/Users/mawei/MyWork/coordex/docs/architecture/project-bootstrap-package.md)
 - [Structured agent communication protocol](/Users/mawei/MyWork/coordex/docs/process/structured-agent-communication-protocol.md)
 - [Context retention after compaction](/Users/mawei/MyWork/coordex/docs/process/context-retention-after-compaction.md)
@@ -122,13 +125,13 @@ Browser debugging note:
 
 - Auth: reads current Codex account state and can start ChatGPT login
 - Projects: local metadata only, bound to a filesystem root
-- Project bootstrap: registering a project seeds a minimal methodology and SessionStart hook package for missing files under that root
+- Project bootstrap: registering a project seeds missing files from the selected internal template plus the root `AGENTS.md` workflow block for that root
 - Chats: local metadata mapped to Codex thread ids
 - Agents: project-template-driven role creation under `projectRoot/Agents/<role>/`
 - Agent creation: synchronizes the role directory, the role thread, and the generated project-level roster in root `AGENTS.md`
 - Root chat initialization: Coordex sends a short no-tools initialization prompt immediately after creating the root thread and waits for a real assistant reply before the chat is considered active
 - Agent initialization: Coordex sends a constrained read-only startup prompt after creating the role thread so the agent confirms its loaded instruction chain, reads a small set of stable authority docs if they exist, and then reports readiness
-- Role-state scaffolding: agent creation also seeds `docs/project/role-state/<role>.md` so durable per-role assignment, blockers, and next-step state can survive compaction
+- Role-state scaffolding: the template baseline seeds default role-state files, and custom role creation adds a matching missing `docs/project/role-state/<role>.md` from the selected template scaffold
 - Agent coordination contract: the durable source of truth for agent-to-agent and agent-to-supervisor messaging should be the structured protocol in `docs/process/structured-agent-communication-protocol.md`, with fixed field names and enums rather than freeform prose
 - Restore: persists last selected project and chat
 - Layout: fixed project controls on the left, focused chat view on the right, resizable divider in between

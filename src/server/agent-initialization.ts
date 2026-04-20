@@ -7,7 +7,7 @@ import type { CodexThread } from "../shared/types.js";
 export const AGENT_READY_TOKEN = "READY_FOR_ASSIGNMENT";
 export const ROOT_CHAT_READY_TOKEN = "ROOT_CHAT_READY";
 
-const MAX_AGENT_STARTUP_DOCS = 8;
+const MAX_AGENT_STARTUP_DOCS = 12;
 
 export function resolveAgentInitializationDocs(input: {
   projectRoot: string;
@@ -60,24 +60,6 @@ export function buildAgentInitializationPrompt(input: {
       ? ["Priority project files to read if they exist:", ...input.startupDocs.map((path, index) => `${index + 1}. ${path}`)].join("\n")
       : "No extra project files are listed for startup. Rely on the loaded instruction chain and the root project docs that already apply.";
 
-  const supervisorBootstrapLine =
-    input.roleName.trim().toLowerCase() === "supervisor"
-      ? [
-          "If the current plan is still blank, your first post-initialization responsibility is to draft the current goal and the first set of single-owner subfunctions in `.coordex/current-plan.md` before dispatching implementation work.",
-          "When you later receive a new product goal, do not implement it in the supervisor thread unless the human explicitly makes `supervisor` the implementation owner for that task.",
-          "Default to routing implementation to the matching worker role after the plan exists."
-        ].join("\n")
-      : null;
-  const engineerBrowserLine =
-    input.roleName.trim().toLowerCase() === "engineer"
-      ? [
-          "If browser validation is required, treat the dedicated browser workflow as a hard constraint.",
-          "Reuse the existing dedicated Chrome session at `http://127.0.0.1:9333` with remote-debugging-port `9333` and user-data-dir `/tmp/chrome-mcp-dedicated-9333` when that workflow doc exists.",
-          "Prefer reusing an already-open dedicated-browser tab for the target preview or page instead of opening duplicate tabs.",
-          "Do not launch default Chrome, temporary Chrome profiles, or auto-connect browser sessions."
-        ].join("\n")
-      : null;
-
   return [
     "[Coordex Agent Initialization]",
     "",
@@ -90,9 +72,9 @@ export function buildAgentInitializationPrompt(input: {
     "Treat the instructions already loaded for this thread at startup as the primary persistent rules.",
     "You may use read-only file inspection tools to read only the priority project files listed below.",
     "Do not inspect unrelated files. Do not edit anything. Do not start implementation work. Do not browse the web. Do not run tests or long-lived commands.",
+    "When later work depends on engine, platform, framework, editor, build, or runtime rules, start with the official docs for the actual project stack before widening into generic web search.",
+    "Prefer existing documented engine, framework, platform, or runtime capabilities before inventing custom workarounds.",
     "If the startup docs include a structured coordination protocol, treat that protocol as the required format for later role-to-role and role-to-supervisor coordination.",
-    supervisorBootstrapLine,
-    engineerBrowserLine,
     "",
     startupDocLines,
     "",

@@ -1,20 +1,24 @@
-import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
+import { DEFAULT_AGENTS_DIRECTORY_NAME, type AgentRoleTemplate } from "../shared/agents.js";
 import {
-  DEFAULT_AGENTS_DIRECTORY_NAME,
+  buildTemplateRenderVariables,
+  getAgentsDirectoryTemplatePath,
+  getCustomRoleInstructionTemplatePath,
+  getRoleInstructionTemplatePath,
+  renderTemplateText,
   resolveAgentProjectTemplate,
   resolveAgentRoleTemplate,
-  type AgentProjectTemplate,
-  type AgentRoleTemplate
-} from "../shared/agents.js";
+  type LoadedAgentProjectTemplate
+} from "./template-loader.js";
 
 type AgentWorkspace = {
   roleName: string;
   roleDirectory: string;
   cwd: string;
   chatTitle: string;
-  projectTemplate: AgentProjectTemplate;
+  projectTemplate: LoadedAgentProjectTemplate;
   roleTemplate?: AgentRoleTemplate;
 };
 
@@ -88,44 +92,29 @@ function normalizeRoleDirectoryName(value: string): string {
     .replace(/-+$/, "");
 }
 
-function ensureAgentsDirectoryInstructions(cwd: string, projectTemplate: AgentProjectTemplate): void {
-  const agentsPath = resolve(cwd, "AGENTS.md");
-  if (existsSync(agentsPath)) {
+function writeRenderedTemplateIfMissing(path: string, templatePath: string, projectTemplate: LoadedAgentProjectTemplate): void {
+  if (existsSync(path)) {
     return;
   }
 
-  const content = [
-    "# Agents Directory",
-    "",
-    "These instructions apply to every Codex thread started under this directory. The project root AGENTS.md still applies first.",
-    "",
-    `- Directory: \`${projectTemplate.directoryName}\``,
-    `- Template: \`${projectTemplate.key}\``,
-    `- Purpose: ${projectTemplate.description}`,
-    "- Keep one role per subdirectory under this folder.",
-    "- Use English directory names that are stable and machine-safe.",
-    "- Put role-local behavior in `AGENTS.md` inside the role directory instead of overloading this shared layer.",
-    "",
-    "## Shared Coordination Rules",
-    "",
-    ...projectTemplate.sharedRoleRules.map((rule) => `- ${rule}`),
-    "",
-    "## Shared Startup Docs",
-    "",
-    "Read these before non-trivial work if they exist:",
-    "",
-    ...projectTemplate.sharedStartupDocCandidates.map((path) => `- \`${path}\``),
-    "",
-    "If a listed file is missing, continue with the files that do exist."
-  ].join("\n");
+  const content = renderTemplateText(
+    readFileSync(templatePath, "utf8"),
+    buildTemplateRenderVariables({
+      projectTemplate
+    })
+  );
 
-  writeFileSync(agentsPath, content, "utf8");
+  writeFileSync(path, `${content.trimEnd()}\n`, "utf8");
+}
+
+function ensureAgentsDirectoryInstructions(cwd: string, projectTemplate: LoadedAgentProjectTemplate): void {
+  writeRenderedTemplateIfMissing(resolve(cwd, "AGENTS.md"), getAgentsDirectoryTemplatePath(projectTemplate), projectTemplate);
 }
 
 function ensureRoleInstructions(
   cwd: string,
   roleName: string,
-  projectTemplate: AgentProjectTemplate,
+  projectTemplate: LoadedAgentProjectTemplate,
   roleTemplate?: AgentRoleTemplate,
   rolePurpose?: string
 ): void {
@@ -135,54 +124,23 @@ function ensureRoleInstructions(
     return;
   }
 
-  const description = rolePurpose?.trim() || roleTemplate?.description || "Role-specific operating notes for this directory.";
-  const templateLabel = roleTemplate?.key ?? "custom";
-  const roleMission = roleTemplate?.mission ?? [
-    "Own the responsibility described in the role purpose for the scoped work that lands in this directory.",
-    "Keep stable role behavior here and move changing project facts into the project docs instead of chat memory."
-  ];
-  const roleOperatingRules = roleTemplate?.operatingRules ?? [
-    "Use this file for durable role behavior, not for per-task scope that will immediately drift.",
-    "Before non-trivial work, read the relevant project docs instead of guessing missing context.",
-    "Escalate missing authority or unclear ownership back to the human or supervisor."
-  ];
-  const handoffContract = roleTemplate?.handoffContract ?? [
-    "Return concise handoffs that say what changed, how it was validated, and what still blocks completion.",
-    "If the next owner needs durable context, ask for it to be written into project docs rather than relying on ephemeral memory."
-  ];
-  const startupDocs = roleTemplate?.startupDocCandidates ?? [];
+  if (roleTemplate) {
+    writeRenderedTemplateIfMissing(
+      roleAgentsPath,
+      getRoleInstructionTemplatePath(projectTemplate, roleTemplate.directoryName),
+      projectTemplate
+    );
+    return;
+  }
 
-  const content = [
-    `# ${roleName} Role Instructions`,
-    "",
-    `These instructions apply to Codex threads started in this directory. The project root AGENTS.md and parent \`${projectTemplate.directoryName}/AGENTS.md\` still apply first; this file only adds role-local behavior.`,
-    "",
-    `- Role: \`${roleName}\``,
-    `- Template: \`${projectTemplate.key}/${templateLabel}\``,
-    `- Purpose: ${description}`,
-    "- Keep stable role behavior here. Put changing milestone details, current tasks, and temporary constraints into project docs or task prompts instead.",
-    "",
-    "## Mission",
-    "",
-    ...roleMission.map((entry) => `- ${entry}`),
-    "",
-    "## Operating Rules",
-    "",
-    ...roleOperatingRules.map((entry) => `- ${entry}`),
-    "",
-    "## Default Project Docs",
-    "",
-    startupDocs.length
-      ? "Read these before non-trivial work if they exist:"
-      : "No role-specific default docs are configured for this template.",
-    ...startupDocs.map((path) => `- \`${path}\``),
-    startupDocs.length ? "" : "",
-    "## Handoff Contract",
-    "",
-    ...handoffContract.map((entry) => `- ${entry}`)
-  ]
-    .filter(Boolean)
-    .join("\n");
+  const customInstructionTemplate = readFileSync(getCustomRoleInstructionTemplatePath(projectTemplate), "utf8");
+  const content = renderTemplateText(customInstructionTemplate, {
+    ...buildTemplateRenderVariables({
+      projectTemplate
+    }),
+    CUSTOM_ROLE_NAME: roleName,
+    CUSTOM_ROLE_PURPOSE: rolePurpose?.trim() || "Role-specific operating notes for this directory."
+  });
 
-  writeFileSync(roleAgentsPath, content, "utf8");
+  writeFileSync(roleAgentsPath, `${content.trimEnd()}\n`, "utf8");
 }

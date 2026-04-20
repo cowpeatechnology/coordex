@@ -1,3 +1,5 @@
+import type { AgentProjectTemplate } from "./agents.js";
+
 export type AuthStatus = "authenticated" | "unauthenticated" | "unknown";
 export type ChatSource = "coordex" | "imported";
 export type CoordexChatKind = "chat" | "agent";
@@ -46,11 +48,17 @@ export type AuthSummary = {
   requiresOpenaiAuth: boolean;
 };
 
+export type CodexExecutionProfile = {
+  model: string | null;
+  reasoningEffort: string | null;
+};
+
 export type CodexThreadItem =
   | { type: "userMessage"; id: string; content: Array<{ type: string; text?: string; path?: string; url?: string }> }
   | { type: "agentMessage"; id: string; text: string; phase: string | null }
   | { type: "plan"; id: string; text: string }
   | { type: "reasoning"; id: string; summary: string[]; content: string[] }
+  | { type: "compaction"; id: string; encrypted_content?: string }
   | {
       type: "commandExecution";
       id: string;
@@ -157,6 +165,7 @@ export type ChatDetail = {
   project: CoordexProject;
   chat: CoordexChat;
   thread: CodexThread;
+  executionProfile: CodexExecutionProfile;
   liveState: {
     runningTurnId: string | null;
     draftAssistantText: string;
@@ -165,6 +174,7 @@ export type ChatDetail = {
 
 export type BootstrapPayload = {
   auth: AuthSummary;
+  templates: AgentProjectTemplate[];
   projects: CoordexProject[];
   selection: {
     projectId: string | null;

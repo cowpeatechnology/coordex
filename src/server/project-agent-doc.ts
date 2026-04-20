@@ -1,8 +1,9 @@
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { relative, resolve } from "node:path";
 
-import { AGENT_PROJECT_TEMPLATES, DEFAULT_AGENTS_DIRECTORY_NAME } from "../shared/agents.js";
+import { DEFAULT_AGENTS_DIRECTORY_NAME } from "../shared/agents.js";
 import type { CoordexChat } from "../shared/types.js";
+import { listAgentProjectTemplates } from "./template-loader.js";
 
 type ProjectAgentDocEntry = {
   roleName: string;
@@ -17,17 +18,18 @@ const AGENT_SECTION_TITLE = "## Coordex Agent Roles";
 const AGENT_SECTION_START = "<!-- COORDEX:AGENT-ROSTER:START -->";
 const AGENT_SECTION_END = "<!-- COORDEX:AGENT-ROSTER:END -->";
 
-const fallbackPurposeByDirectory = new Map(
-  AGENT_PROJECT_TEMPLATES.flatMap((template) =>
-    template.roles.map((role) => [
-      `${template.directoryName}/${role.directoryName}`.toLowerCase(),
-      {
-        roleName: role.label,
-        purpose: role.description
-      }
-    ])
-  )
-);
+const buildFallbackPurposeByDirectory = (): Map<string, { roleName: string; purpose: string }> =>
+  new Map(
+    listAgentProjectTemplates().flatMap((template) =>
+      template.roles.map((role) => [
+        `${template.directoryName}/${role.directoryName}`.toLowerCase(),
+        {
+          roleName: role.label,
+          purpose: role.description
+        }
+      ])
+    )
+  );
 
 function parseInstructionField(content: string, field: "Role" | "Purpose"): string | null {
   const match = content.match(new RegExp(`^- ${field}:\\s*(.+)$`, "m"));
@@ -61,6 +63,7 @@ function resolveRoleDirectoryFromCwd(projectRoot: string, cwd: string): string |
 }
 
 function collectRoleDirectoryInfo(projectRoot: string): Map<string, Omit<ProjectAgentDocEntry, "threadTitle">> {
+  const fallbackPurposeByDirectory = buildFallbackPurposeByDirectory();
   const agentsRoot = resolve(projectRoot, DEFAULT_AGENTS_DIRECTORY_NAME);
   if (!existsSync(agentsRoot)) {
     return new Map();
@@ -171,8 +174,6 @@ export function syncProjectAgentRegistry(projectRoot: string, chats?: CoordexCha
   const nextSection = renderAgentSection(agents);
 
   if (!existsSync(agentsPath)) {
-    const initialContent = ["# Project Instructions", "", nextSection].join("\n");
-    writeFileSync(agentsPath, initialContent, "utf8");
     return;
   }
 

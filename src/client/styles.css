@@ -192,7 +192,8 @@ h2 {
 .thread-link-row,
 .composer-header,
 .auth-inline,
-.sidebar-inline-actions {
+.sidebar-inline-actions,
+.composer-actions {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -1190,10 +1191,46 @@ textarea {
   gap: 10px;
 }
 
+.composer-actions {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
 .composer textarea {
   min-height: 58px;
   max-height: 110px;
   resize: vertical;
+}
+
+.composer-compact-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.composer-profile-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 252, 247, 0.84);
+  color: var(--muted);
+  font-family: "SFMono-Regular", "Cascadia Mono", "IBM Plex Mono", "Menlo", monospace;
+  font-size: 0.78rem;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.composer-compact-button svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
 }
 
 @media (max-width: 860px) {

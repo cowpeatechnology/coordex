@@ -1,6 +1,6 @@
 import { CSSProperties, FormEvent, MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from "react";
 
-import { AGENT_PROJECT_TEMPLATES } from "../shared/agents";
+import type { AgentProjectTemplate } from "../shared/agents";
 import type {
   AuthSummary,
   ChatDetail,
@@ -55,14 +55,33 @@ function formatTime(value: string | number | null | undefined): string {
   }).format(date);
 }
 
-function describeChatResponsibility(chat: CoordexChat): string {
+function formatExecutionProfile(detail: ChatDetail | null): string {
+  const model = detail?.executionProfile.model?.trim() || "";
+  const effort = detail?.executionProfile.reasoningEffort?.trim() || "";
+
+  if (model && effort) {
+    return `${model} · ${effort}`;
+  }
+
+  if (model) {
+    return model;
+  }
+
+  if (effort) {
+    return `effort ${effort}`;
+  }
+
+  return "profile default";
+}
+
+function describeChatResponsibility(chat: CoordexChat, templates: AgentProjectTemplate[]): string {
   if (chat.kind !== "agent") {
     return "General project discussion and shared workspace context.";
   }
 
   const roleName = normalizeRoleName(chat.roleName);
 
-  for (const template of AGENT_PROJECT_TEMPLATES) {
+  for (const template of templates) {
     const role = template.roles.find((candidate) => normalizeRoleName(candidate.label) === roleName);
     if (role) {
       return role.description;
@@ -115,6 +134,12 @@ function renderItem(item: ChatDetail["thread"]["turns"][number]["items"][number]
         kind: "system" as const,
         title: "Reasoning",
         body: item.summary.join("\n")
+      };
+    case "compaction":
+      return {
+        kind: "system" as const,
+        title: "Context Compact",
+        body: "Older thread context was compacted into a hidden summary."
       };
     case "commandExecution":
       return {
@@ -478,8 +503,24 @@ function IconCheckCircle() {
   );
 }
 
+function IconCompact() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <path d="M3.8 7.2V3.8h3.4" />
+      <path d="M16.2 7.2V3.8h-3.4" />
+      <path d="M3.8 12.8v3.4h3.4" />
+      <path d="M16.2 12.8v3.4h-3.4" />
+      <path d="M7.2 7.2 10 10" />
+      <path d="m12.8 7.2-2.8 2.8" />
+      <path d="M7.2 12.8 10 10" />
+      <path d="m12.8 12.8-2.8-2.8" />
+    </svg>
+  );
+}
+
 export function App() {
   const [auth, setAuth] = useState<AuthSummary | null>(null);
+  const [agentProjectTemplates, setAgentProjectTemplates] = useState<AgentProjectTemplate[]>([]);
   const [projects, setProjects] = useState<CoordexProject[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [projectBundle, setProjectBundle] = useState<ProjectBundle | null>(null);
@@ -499,7 +540,7 @@ export function App() {
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [sidebarComposerMode, setSidebarComposerMode] = useState<SidebarComposerMode>(null);
   const [agentSetupTab, setAgentSetupTab] = useState<AgentSetupTab>("template");
-  const [agentProjectTemplateKey, setAgentProjectTemplateKey] = useState(AGENT_PROJECT_TEMPLATES[0]?.key ?? "");
+  const [agentProjectTemplateKey, setAgentProjectTemplateKey] = useState("");
   const [sidebarWidth, setSidebarWidth] = useState(getInitialSidebarWidth);
   const [layoutRefreshNonce, setLayoutRefreshNonce] = useState(0);
   const [boardDirty, setBoardDirty] = useState(false);
@@ -511,6 +552,7 @@ export function App() {
     chat: false,
     agent: false,
     send: false,
+    compact: false,
     login: false,
     board: false,
     archive: false
@@ -529,8 +571,8 @@ export function App() {
   const isEditingProject = editingProjectId !== null;
 
   const selectedAgentProjectTemplate = useMemo(() => {
-    return AGENT_PROJECT_TEMPLATES.find((template) => template.key === agentProjectTemplateKey) ?? AGENT_PROJECT_TEMPLATES[0] ?? null;
-  }, [agentProjectTemplateKey]);
+    return agentProjectTemplates.find((template) => template.key === agentProjectTemplateKey) ?? agentProjectTemplates[0] ?? null;
+  }, [agentProjectTemplateKey, agentProjectTemplates]);
 
   const chats = projectBundle?.chats ?? [];
   const activePlan = projectBoard?.activePlan ?? null;
@@ -561,6 +603,14 @@ export function App() {
   const refreshBootstrap = async () => {
     const payload = await api.bootstrap();
     setAuth(payload.auth);
+    setAgentProjectTemplates(payload.templates);
+    setAgentProjectTemplateKey((current) => {
+      if (!payload.templates.length) {
+        return "";
+      }
+
+      return payload.templates.some((template) => template.key === current) ? current : payload.templates[0].key;
+    });
     setProjects(payload.projects);
     setSelectedProjectId(payload.selection.projectId);
     setSelectedChatId(payload.selection.chatId);
@@ -1457,10 +1507,42 @@ export function App() {
     await submitMessageToChat(chatDetail.chat.id, chatDetail.project.id, messageText);
   };
 
+  const handleCompactChat = async () => {
+    if (!chatDetail) {
+      return;
+    }
+
+    setBusy((current) => ({ ...current, compact: true }));
+
+    try {
+      const detail = await api.compactChat(chatDetail.chat.id);
+      applyChatDetail(detail);
+
+      const bundle = await api.getProject(detail.project.id).catch(() => null);
+      if (bundle) {
+        setProjectBundle(bundle);
+      }
+
+      setNotice({
+        tone: "info",
+        message: `Requested context compaction for ${detail.chat.title}.`
+      });
+    } catch (error) {
+      setNotice({
+        tone: "error",
+        message: error instanceof Error ? error.message : String(error)
+      });
+    } finally {
+      setBusy((current) => ({ ...current, compact: false }));
+    }
+  };
+
   const isTurnRunning = Boolean(runningTurnId);
   const composerStatus = chatDetail
-    ? busy.send
-      ? "Submitting message to Codex..."
+    ? busy.compact
+      ? "Compacting thread context..."
+      : busy.send
+        ? "Submitting message to Codex..."
       : isTurnRunning
         ? "Codex is thinking..."
         : latestStoppedTurn
@@ -1786,7 +1868,7 @@ export function App() {
                 <label>
                   <span>Template</span>
                   <select value={agentProjectTemplateKey} onChange={(event) => setAgentProjectTemplateKey(event.target.value)}>
-                    {AGENT_PROJECT_TEMPLATES.map((template) => (
+                    {agentProjectTemplates.map((template) => (
                       <option key={template.key} value={template.key}>
                         {template.label}
                       </option>
@@ -1878,7 +1960,7 @@ export function App() {
             {selectedProject ? (
               chats.length ? (
                 chats.map((chat) => {
-                  const responsibility = describeChatResponsibility(chat);
+                  const responsibility = describeChatResponsibility(chat, agentProjectTemplates);
                   const showResponsibilityDetails = needsThreadResponsibilityDetails(responsibility);
 
                   return (
@@ -2161,13 +2243,28 @@ export function App() {
               value={messageText}
               onChange={(event) => setMessageText(event.target.value)}
               placeholder="Send a structured instruction into the selected Codex thread..."
-              disabled={!chatDetail || busy.send}
+              disabled={!chatDetail || busy.send || busy.compact}
             />
             <div className="composer-row">
               <span className={`muted ${isTurnRunning ? "composer-status-running" : ""}`}>{composerStatus}</span>
-              <button className="primary-button" disabled={!chatDetail || busy.send || !messageText.trim()}>
-                {busy.send ? "Sending..." : "Send"}
-              </button>
+              <div className="composer-actions">
+                <span className="composer-profile-chip" title="Current thread model and reasoning profile">
+                  {formatExecutionProfile(chatDetail)}
+                </span>
+                <button
+                  className="secondary-button composer-compact-button"
+                  type="button"
+                  onClick={() => void handleCompactChat()}
+                  disabled={!chatDetail || busy.send || busy.compact || isTurnRunning}
+                  title={isTurnRunning ? "Wait for the current turn to finish before compacting." : "Compact current thread context"}
+                >
+                  <IconCompact />
+                  <span>{busy.compact ? "Compacting..." : "Compact"}</span>
+                </button>
+                <button className="primary-button" disabled={!chatDetail || busy.send || busy.compact || !messageText.trim()}>
+                  {busy.send ? "Sending..." : "Send"}
+                </button>
+              </div>
             </div>
           </form>
         </footer>
