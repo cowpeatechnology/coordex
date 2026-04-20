@@ -267,6 +267,36 @@ That is exactly the distinction Coordex needs for:
 - shared role-space rules in intermediate directories
 - role-specific instructions in the role directory
 
+## Additional validated case: no Git root vs post-`git init`
+
+The earlier test above proves the positive inheritance case once a Git root exists.
+
+A later local validation on `2026-04-20` established the failure mode and recovery rule that Coordex should now treat as operational guidance.
+
+Test project:
+
+- root: `/Users/mawei/MyWork/CoordexCase2`
+- role directory: `/Users/mawei/MyWork/CoordexCase2/Agents/supervisor`
+- clean child directory for root-only inheritance check: `/Users/mawei/MyWork/CoordexCase2/new`
+
+Observed sequence:
+
+1. Before `git init`, sessions started from `Agents/supervisor/` could load the role-local layer but did not reliably inherit the root `AGENTS.md` and root SessionStart layer.
+2. After `git init` at `/Users/mawei/MyWork/CoordexCase2`, a fresh session started from `new/` inherited the root token and root SessionStart layer.
+3. After the same `git init`, a fresh session started from `Agents/supervisor/` inherited all three validated layers:
+   - root `AGENTS.md`
+   - role-local `AGENTS.md`
+   - supervisor-local SessionStart hook
+4. A session that had originally been created before `git init` showed mixed behavior after resume:
+   - root and local SessionStart hooks could appear
+   - but the root `AGENTS.md` token was still absent from the loaded startup chain
+
+Practical conclusion:
+
+- for current Coordex practice, treat a Git root as the only safe baseline for role-thread inheritance
+- if the target root has no `.git`, run `git init` before project registration or role creation
+- if a role thread was first created before `git init`, treat that thread as contaminated and archive/recreate it instead of trusting it to recover a clean startup chain
+
 ## Related docs
 
 - [README.md](/Users/mawei/MyWork/coordex/README.md)

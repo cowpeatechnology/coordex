@@ -24,6 +24,13 @@ The intent is not to invent project truth automatically. The intent is to make a
 
 The default template currently lives under `templates/game-development/`.
 
+Bootstrap prerequisite:
+
+- before Coordex registers a project or creates any role threads under it, the target root should already have a real project-root marker
+- the current safe Coordex rule is to require `.git` at the target root and run `git init` first when it is missing
+- do not rely on a user-specific global `project_root_markers` override in `~/.codex/config.toml` as the product baseline
+- if role threads were first created before that Git root existed, treat those old threads as contaminated and recreate them after `git init`
+
 Coordex copies or syncs missing versions of:
 
 - root `AGENTS.md`
@@ -69,6 +76,8 @@ This is deliberate. According to the official Codex `AGENTS.md` guidance, Codex 
 
 Coordex relies on that hierarchy so each role thread automatically sees the project-level identity and shared role roster before it sees its own local role instructions. Root chats are different: they start in the project root, remain temporary project conversations, and are not part of the durable role roster.
 
+That inheritance depends on Codex actually recognizing the target root as the project root. In the verified local tests, the reliable baseline was an actual Git root. Without `.git`, child-directory sessions could fall back to treating the current directory as the effective root, which prevented the project root `AGENTS.md` and root `.codex` layer from being inherited.
+
 Official references:
 
 - [Custom instructions with AGENTS.md](https://developers.openai.com/codex/guides/agents-md)
@@ -80,6 +89,7 @@ Official references:
 - [Project bootstrap package](/Users/mawei/MyWork/coordex/docs/architecture/project-bootstrap-package.md)
 - [Structured agent communication protocol](/Users/mawei/MyWork/coordex/docs/process/structured-agent-communication-protocol.md)
 - [Context retention after compaction](/Users/mawei/MyWork/coordex/docs/process/context-retention-after-compaction.md)
+- [Template validation test rules](/Users/mawei/MyWork/coordex/docs/process/template-validation-test-rules.md)
 - [Reset a project to a clean agent-free test state](/Users/mawei/MyWork/coordex/docs/process/reset-to-clean-agent-state.md)
 
 ## Why Coordex exists
@@ -140,6 +150,7 @@ Browser debugging note:
 
 - This version does not implement approvals UI
 - Until approvals UI exists, Coordex-created and Coordex-resumed threads run with `danger-full-access` sandbox and `never` approval so browser-driven workflows do not deadlock on hidden approval prompts
+- Today, the safe bootstrap rule is documented but not yet fully enforced by product code: if a target root lacks `.git`, establish it before trusting multi-layer `AGENTS.md` and project-scoped `.codex` inheritance
 - Thread discovery is prefix-based on thread `cwd`, so project roots work best when chats are opened from that root or its subdirectories
 - Coordex-created root chats are auto-initialized so they do not remain in a zero-turn pending state under normal creation flow
 - Coordex-created agent threads are auto-initialized so they do not remain in a zero-turn pending state under normal creation flow

@@ -83,6 +83,7 @@ Current project layout:
 - Keep Coordex local-first. Do not introduce remote infrastructure unless the user explicitly asks for it.
 - Do not claim access to Codex-native global projects unless app-server actually exposes that capability and the code uses it.
 - Do not hide project-level coordination behind black-box worker orchestration as the primary workflow.
+- Do not bootstrap multi-layer `AGENTS.md` and project-scoped `.codex` behavior into a target tree until the target root has a real project-root marker. The current safe Coordex rule is: if the target root has no `.git`, establish one with `git init` before project registration or role creation.
 - Do not treat the dedicated Chrome workflow as optional. Browser validation for this repo is only valid when attached to the fixed dedicated Chrome instance documented in `docs/process/dedicated-browser-workflow.md`.
 - Do not couple Coordex to a specific game, repo, or domain in product language or architecture.
 - Do not let UI polish break the core workflows: auth, project binding, thread discovery, chat creation, resume, and message sending.
@@ -140,6 +141,7 @@ Role creation rules:
 
 - role directories should use stable English names
 - role chats should start in `projectRoot/Agents/<role>/`
+- before any role thread is created, the target root should already be a real Codex-detectable project root; for current Coordex practice, require `git init` at the target root if `.git` does not exist
 - agent creation is a three-way sync operation across the role directory, the Codex thread started in that directory, and the generated role roster block in the project root `AGENTS.md`
 - agent creation should also ensure the durable per-role state file exists under `docs/project/role-state/<role>.md`
 - role creation is not complete until Coordex has sent the initialization prompt and received the first assistant reply for that role thread
@@ -148,6 +150,7 @@ Role creation rules:
 - per-role local instructions should live in `Agents/<role>/AGENTS.md`
 - stable project facts belong in the project root `AGENTS.md` or durable project docs, not only in an initialization prompt
 - project registration should ensure a project-scoped `.codex` SessionStart reminder layer exists unless the project already defines its own files
+- threads first created before the target root had a valid project-root marker must be treated as contaminated for inheritance validation; the safe recovery path is to archive and recreate them after `git init`
 - direct peer coordination is allowed only inside an already active subfunction; task start, major scope changes, and acceptance still belong to the supervisor or human
 - role-to-role and role-to-supervisor coordination should use the structured contract documented in [docs/process/structured-agent-communication-protocol.md](/Users/mawei/MyWork/coordex/docs/process/structured-agent-communication-protocol.md) instead of drifting into unconstrained prose
 - role-specific mission, ownership, and handoff rules belong in `Agents/<role>/AGENTS.md`
@@ -182,6 +185,9 @@ If moving this repo into a clean standalone directory, preserve:
 - Verify with `npm run build` after meaningful changes.
 - For UI changes, inspect the rendered page in a browser instead of relying only on source review.
 - Browser validation for this repo must follow [docs/process/dedicated-browser-workflow.md](/Users/mawei/MyWork/coordex/docs/process/dedicated-browser-workflow.md).
+- When validating a target project through Coordex, follow [docs/process/template-validation-test-rules.md](/Users/mawei/MyWork/coordex/docs/process/template-validation-test-rules.md) and simulate a real human operator rather than coaching the target project's roles out of band.
+- During template validation, only provide the target supervisor with product or feature requirements. Do not inject project workflow rules, board-format rules, communication rules, browser-debugging rules, or other template-owned behavior by chat.
+- If a validation run needs extra coaching about rules that should have come from the generated files or SessionStart reminder layer, treat that as a template failure, not a passing run.
 - Keep integration logic in the server layer explicit; avoid burying app-server assumptions inside UI code.
 - Treat `output/` as disposable local artifacts, not source.
 - Apply the code-vs-template boundary on every multi-agent bug or workflow bug:

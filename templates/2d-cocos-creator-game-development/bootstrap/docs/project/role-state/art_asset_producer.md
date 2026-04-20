@@ -8,7 +8,8 @@ _None yet._
 
 ## Active Constraints
 
-_None yet._
+- Keep generator scripts, prompt notes, preview sheets, and spec markdown outside the runtime Cocos `assets/` tree unless the shipped game actually loads them.
+- When handing off multiple art variants, list the exact variants, sizes, file formats, and intended in-game usage.
 
 ## Current Blockers
 

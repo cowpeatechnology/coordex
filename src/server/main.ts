@@ -107,6 +107,7 @@ const getChatDetail = async (chatId: string): Promise<ChatDetail> => {
     chat: nextChat,
     thread,
     executionProfile: readCodexExecutionProfileForProject(project.rootPath),
+    tokenUsage: codex.getThreadTokenUsage(thread.id),
     liveState: codex.getReconciledLiveState(thread)
   };
 };

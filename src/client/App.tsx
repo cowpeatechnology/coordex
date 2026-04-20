@@ -74,6 +74,113 @@ function formatExecutionProfile(detail: ChatDetail | null): string {
   return "profile default";
 }
 
+function formatTokenCount(value: number): string {
+  const abs = Math.abs(value);
+  if (abs >= 1_000_000) {
+    return `${(value / 1_000_000).toFixed(1).replace(/\\.0$/, "")}m`;
+  }
+
+  if (abs >= 1_000) {
+    return `${(value / 1_000).toFixed(1).replace(/\\.0$/, "")}k`;
+  }
+
+  return value.toLocaleString();
+}
+
+function formatContextWindowUsage(detail: ChatDetail | null): string {
+  const usage = detail?.tokenUsage;
+  if (!usage) {
+    return "ctx —";
+  }
+
+  const used = usage.last.inputTokens;
+  if (usage.modelContextWindow && usage.modelContextWindow > 0) {
+    return `ctx ${formatTokenCount(used)} / ${formatTokenCount(usage.modelContextWindow)}`;
+  }
+
+  return `ctx ${formatTokenCount(used)}`;
+}
+
+function getContextWindowUsageTitle(detail: ChatDetail | null): string {
+  const usage = detail?.tokenUsage;
+  if (!usage) {
+    return "Current thread context usage is not available yet. Codex app-server reports it after a completed turn.";
+  }
+
+  const lines = [
+    `Current prompt window: ${usage.last.inputTokens.toLocaleString()} tokens`,
+    `Latest turn total: ${usage.last.totalTokens.toLocaleString()} tokens`,
+    `Latest turn cached input: ${usage.last.cachedInputTokens.toLocaleString()} tokens`,
+    `Latest turn output: ${usage.last.outputTokens.toLocaleString()} tokens`,
+    `Latest turn reasoning: ${usage.last.reasoningOutputTokens.toLocaleString()} tokens`,
+    `Thread cumulative total: ${usage.total.totalTokens.toLocaleString()} tokens`
+  ];
+
+  if (usage.modelContextWindow && usage.modelContextWindow > 0) {
+    const percent = Math.min(100, (usage.last.inputTokens / usage.modelContextWindow) * 100);
+    lines.unshift(`Context window: ${usage.modelContextWindow.toLocaleString()} tokens`);
+    lines.push(`Window used: ${percent.toFixed(1)}%`);
+  }
+
+  return lines.join("\n");
+}
+
+function readInteger(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function readNotificationTokenUsage(params: Record<string, unknown> | undefined): ChatDetail["tokenUsage"] {
+  const turnId = typeof params?.turnId === "string" ? params.turnId : null;
+  const tokenUsage = params?.tokenUsage;
+
+  if (!turnId || !tokenUsage || typeof tokenUsage !== "object") {
+    return null;
+  }
+
+  const readBreakdown = (value: unknown) => {
+    if (!value || typeof value !== "object") {
+      return null;
+    }
+
+    const cachedInputTokens = readInteger(Reflect.get(value, "cachedInputTokens"));
+    const inputTokens = readInteger(Reflect.get(value, "inputTokens"));
+    const outputTokens = readInteger(Reflect.get(value, "outputTokens"));
+    const reasoningOutputTokens = readInteger(Reflect.get(value, "reasoningOutputTokens"));
+    const totalTokens = readInteger(Reflect.get(value, "totalTokens"));
+
+    if (
+      cachedInputTokens === null ||
+      inputTokens === null ||
+      outputTokens === null ||
+      reasoningOutputTokens === null ||
+      totalTokens === null
+    ) {
+      return null;
+    }
+
+    return {
+      cachedInputTokens,
+      inputTokens,
+      outputTokens,
+      reasoningOutputTokens,
+      totalTokens
+    };
+  };
+
+  const last = readBreakdown(Reflect.get(tokenUsage, "last"));
+  const total = readBreakdown(Reflect.get(tokenUsage, "total"));
+  if (!last || !total) {
+    return null;
+  }
+
+  return {
+    last,
+    total,
+    modelContextWindow: readInteger(Reflect.get(tokenUsage, "modelContextWindow")),
+    turnId
+  };
+}
+
 function describeChatResponsibility(chat: CoordexChat, templates: AgentProjectTemplate[]): string {
   if (chat.kind !== "agent") {
     return "General project discussion and shared workspace context.";
@@ -930,6 +1037,25 @@ export function App() {
         selectedProjectId
       ) {
         void loadProject(selectedProjectId, false, { includeBoard: true });
+        return;
+      }
+
+      if (method === "thread/tokenUsage/updated" && isCurrentThread) {
+        const tokenUsage = readNotificationTokenUsage(params);
+        if (!tokenUsage) {
+          return;
+        }
+
+        setChatDetail((current) => {
+          if (!current || current.chat.threadId !== threadId) {
+            return current;
+          }
+
+          return {
+            ...current,
+            tokenUsage
+          };
+        });
       }
     };
 
@@ -2248,6 +2374,9 @@ export function App() {
             <div className="composer-row">
               <span className={`muted ${isTurnRunning ? "composer-status-running" : ""}`}>{composerStatus}</span>
               <div className="composer-actions">
+                <span className="composer-profile-chip" title={getContextWindowUsageTitle(chatDetail)}>
+                  {formatContextWindowUsage(chatDetail)}
+                </span>
                 <span className="composer-profile-chip" title="Current thread model and reasoning profile">
                   {formatExecutionProfile(chatDetail)}
                 </span>

@@ -24,6 +24,31 @@ When a project root is registered, Coordex now copies missing files from `templa
 
 The default template today is `templates/game-development/`.
 
+## Project-root prerequisite
+
+Before Coordex bootstraps a target project, the target root must already be a real Codex-detectable project root.
+
+The current safe Coordex baseline is:
+
+- require a `.git` directory at the target root
+- if `.git` is missing, run `git init` before project registration or role creation
+- do not assume a user-specific `project_root_markers` override exists in `~/.codex/config.toml`
+
+Why this matters:
+
+- Codex discovers `AGENTS.md` and project-scoped `.codex/config.toml` from the project root down to the current working directory
+- in local validation, when no Git root existed, child-directory sessions could behave as if their current directory were the effective root
+- that broke the intended inheritance chain for root `AGENTS.md` and root SessionStart hooks
+
+Coordex should therefore treat Git-root establishment as a bootstrap prerequisite, not an optional cleanup step after roles already exist.
+
+Important update rule:
+
+- bootstrap files are only written when missing
+- changing a template inside the Coordex repo does not overwrite previously generated copies in an existing project
+- if you want an already-registered project to pick up newer template rules, delete the old generated copies first and then trigger bootstrap again
+- if old role threads or child-directory sessions were first created before the target root had `.git`, archive and recreate those threads after `git init` instead of trusting them to recover a clean startup chain
+
 That bootstrap currently includes:
 
 - `AGENTS.md`

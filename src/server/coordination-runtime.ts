@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import type { CoordexPlanCoordination, CoordexProjectBoard, CodexTurn } from "../shared/types.js";
 import type { CodexAppServerClient } from "./codex-app-server.js";
-import { updateProjectBoardFeature } from "./project-board.js";
+import { loadProjectBoard, updateProjectBoardFeature } from "./project-board.js";
 import type { StateStore } from "./store.js";
 
 type StructuredCoordinationEnvelope = {
@@ -131,6 +131,12 @@ function isFinalAcceptanceDecision(envelope: StructuredCoordinationEnvelope): bo
   return envelope.kind === "decision" && envelope.status === "done";
 }
 
+function isOpenActiveTask(projectRoot: string, taskId: string): boolean {
+  const board = loadProjectBoard(projectRoot);
+  const feature = board.activePlan.features.find((entry) => entry.id === taskId);
+  return Boolean(feature && !feature.done);
+}
+
 export class AutoCoordinationRuntime {
   private readonly processedTurnIds = new Set<string>();
 
@@ -182,6 +188,13 @@ export class AutoCoordinationRuntime {
     this.processedTurnIds.add(turn.id);
     const envelope = extractStructuredEnvelopeFromTurn(turn);
     if (!envelope) {
+      return;
+    }
+
+    // Ignore stale coordination traffic once a task has left the active plan or
+    // has already been accepted. History items should stay readable, but they
+    // must not continue to drive live auto-relay behavior.
+    if (!isOpenActiveTask(project.rootPath, envelope.task_id)) {
       return;
     }
 
@@ -276,6 +289,10 @@ export class AutoCoordinationRuntime {
     this.processedTurnIds.add(turn.id);
     const taskId = extractTaskIdFromTurn(turn);
     if (!taskId) {
+      return;
+    }
+
+    if (!isOpenActiveTask(project.rootPath, taskId)) {
       return;
     }
 

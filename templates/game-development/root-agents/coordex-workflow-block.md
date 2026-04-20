@@ -8,7 +8,8 @@ This block is maintained by Coordex from the `{{PROJECT_TEMPLATE_KEY}}` template
 - The supervisor owns planning, routing, scope boundaries, and final acceptance.
 - The supervisor plans and routes by default; it does not absorb worker-owned implementation unless the human explicitly assigns that ownership.
 - Each active subfunction must have exactly one implementation owner role.
-- The current plan is tracked in `.coordex/current-plan.md` and `.coordex/project-board.json`.
+- The human-readable current plan lives in `.coordex/current-plan.md`.
+- `.coordex/project-board.json` is the machine-consumed Coordex board state. Keep it schema-accurate if it must be repaired, but do not treat it as a free-form planning note.
 - Role-local durable context belongs in `docs/project/role-state/<role>.md` instead of long chat history.
 - When the same missing fact causes repeated mistakes, write it back into this file or another checked-in project doc.
 

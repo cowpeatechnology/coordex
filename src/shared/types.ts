@@ -53,6 +53,21 @@ export type CodexExecutionProfile = {
   reasoningEffort: string | null;
 };
 
+export type CodexTokenUsageBreakdown = {
+  cachedInputTokens: number;
+  inputTokens: number;
+  outputTokens: number;
+  reasoningOutputTokens: number;
+  totalTokens: number;
+};
+
+export type CodexThreadTokenUsage = {
+  last: CodexTokenUsageBreakdown;
+  total: CodexTokenUsageBreakdown;
+  modelContextWindow: number | null;
+  turnId: string;
+};
+
 export type CodexThreadItem =
   | { type: "userMessage"; id: string; content: Array<{ type: string; text?: string; path?: string; url?: string }> }
   | { type: "agentMessage"; id: string; text: string; phase: string | null }
@@ -166,6 +181,7 @@ export type ChatDetail = {
   chat: CoordexChat;
   thread: CodexThread;
   executionProfile: CodexExecutionProfile;
+  tokenUsage: CodexThreadTokenUsage | null;
   liveState: {
     runningTurnId: string | null;
     draftAssistantText: string;

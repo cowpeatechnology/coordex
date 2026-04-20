@@ -19,8 +19,19 @@ These instructions apply to Codex threads started in this directory. The project
 - Before non-trivial work, confirm the current milestone, affected directories, and validation path from project docs.
 - If browser validation is required, the dedicated browser workflow is a hard constraint: reuse `http://127.0.0.1:9333` with remote-debugging-port `9333` and user-data-dir `/tmp/chrome-mcp-dedicated-9333`, and do not launch default Chrome, temporary profiles, or auto-connect fallback browsers.
 - When the required preview or target page is already open in the dedicated browser, reuse that existing tab instead of opening duplicate tabs. Only open a new tab when no suitable existing tab can serve the validation step.
+- If a browser tab was opened only for temporary reading or one-off inspection, close it after use only when you opened that tab for the current task. Never close the Coordex planning console tab itself, the long-lived preview tab, or any intentionally reused project tab unless the human explicitly asked for that cleanup.
+- If Chrome DevTools tooling is used, attach to the dedicated browser with `--browser-url=http://127.0.0.1:9333`; never treat `--autoConnect` or a default-profile browser as valid for this project.
+- If the project docs or scripts already freeze a preview URL or dev-server port, reuse that exact preview and do not silently accept fallback ports from duplicate dev-server launches.
+- When a task depends on engine, platform, framework, editor, build, or runtime contracts, start with the official docs for the actual stack named by the project and freeze the external contract before coding.
+- Keep pre-implementation research proportional to the assigned subfunction. After you have the engine or platform contract, the relevant editor/runtime path, and one workable implementation route, move into the smallest runnable write set in the same turn.
+- For a scoped implementation subfunction, do not stay in open-ended architecture exploration, extra skill loading, or broad reference gathering once the implementation path is clear.
+- If the repository is blank or thin, scaffold only the minimum runnable slice required for the assigned subfunction instead of expanding into a full architecture pass.
+- If you still cannot start writing after the initial contract-freeze pass, return a concise structured blocker or scoped question instead of keeping the subfunction in commentary-only research.
+- Prefer existing documented engine, framework, platform, or runtime capabilities and built-in components before custom glue or workaround code.
 - Prefer the documented runtime and debug loop over ad-hoc prototype paths when the project already has an accepted stack.
 - Prefer documented Cocos Creator editor or configuration workflows over runtime-code workarounds when the engine already provides the required control surface.
+- Do not start with generic web search when official manuals, API docs, or framework best-practice docs already exist for the active stack. Widen the search only when those sources leave a real gap.
+- Keep generator scripts, pipeline specs, and preview-only compositions out of the runtime Cocos `assets/` tree unless the game is supposed to load them at runtime. If an asset-pipeline issue blocks implementation, isolate it explicitly instead of quietly mixing tool files into runtime assets.
 - When product intent and technical reality conflict, explain the tradeoff and route the decision back to the supervisor or human.
 - When coordinating with another role or reporting completion, prefer the structured coordination protocol over freeform prose when that protocol doc exists.
 
@@ -29,6 +40,7 @@ These instructions apply to Codex threads started in this directory. The project
 Read these before non-trivial work if they exist:
 
 - `docs/project/role-state/engineer.md`
+- `docs/process/engineering-standards.md`
 - `docs/templates/worker-handoff-template.md`
 - `docs/process/dedicated-browser-workflow.md`
 - `docs/process/cocos-mcp-workflow.md`

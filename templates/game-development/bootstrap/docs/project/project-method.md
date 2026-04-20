@@ -11,6 +11,7 @@ This file explains the minimum working method for a project bootstrapped by Coor
 5. The human or the supervisor opens the owner role thread and sends the concrete assignment.
 6. Worker roles reply with concise, structured handoff or result messages.
 7. The supervisor updates the current plan, delivery ledger, and any needed decision log entries.
+8. Coordex code maintains the machine board lifecycle such as execution state, history rollover, and archived-plan transitions.
 
 ## Scope Rules
 
@@ -27,9 +28,18 @@ This file explains the minimum working method for a project bootstrapped by Coor
 - Root rules: `AGENTS.md`
 - Current plan: `.coordex/current-plan.md`
 - Plan history: `.coordex/plan-history.md`
+- Machine board state: `.coordex/project-board.json`
 - Role state: `docs/project/role-state/<role>.md`
 - Delivery history: `docs/project/delivery-ledger.md`
 - Important decisions: `docs/project/decision-log.md`
+
+## File Boundaries
+
+- The supervisor's normal planning surface is `.coordex/current-plan.md`.
+- `.coordex/project-board.json` is a machine-consumed Coordex state file, not a free-form supervisor document.
+- Do not rewrite `.coordex/project-board.json` during ordinary planning if `.coordex/current-plan.md` already expresses the intended goal and subfunctions.
+- Only repair `.coordex/project-board.json` when the human explicitly asks for a board fix or when a documented workflow says a direct machine-file repair is required.
+- If a repair is required, preserve the exact current Coordex schema, including `ownerRole`, `done`, `runState`, and `coordinations` for each feature.
 
 ## First Supervisor Action
 
@@ -37,3 +47,4 @@ If the project has no meaningful current plan yet, the supervisor's first real t
 
 The supervisor should not jump straight into implementation when a matching worker role already exists.
 Plan first, then route the first concrete work order to the single owner role.
+Do not block that first plan on deeper engine, framework, or runtime research. If technical detail is still uncertain, encode that uncertainty into an engineer-owned subfunction or validation step and keep the planning loop moving.

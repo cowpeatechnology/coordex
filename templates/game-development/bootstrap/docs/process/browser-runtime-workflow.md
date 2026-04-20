@@ -12,7 +12,7 @@ Use this document when an assigned task depends on browser-visible runtime behav
 ## Evidence Rules
 
 - Reuse an already-open dedicated-browser tab when it already shows the right preview or target page.
-- Close temporary one-off research or inspection tabs after use. Keep long-lived preview or intentionally reused project tabs open.
+- Close only temporary one-off research or inspection tabs that you opened for the current task. Never close the Coordex console tab itself, the long-lived preview tab, or any intentionally reused project tab unless the human explicitly asked for that cleanup.
 - Start with the smallest observation path that can answer the question: current preview, visible runtime state, existing logs, or documented debug surfaces.
 - If the real stack already exposes the needed state or configuration through a supported surface, use that before adding temporary runtime debug code.
 - If the local environment cannot prove a browser or platform-specific claim, record that as environment-limited instead of inventing certainty.

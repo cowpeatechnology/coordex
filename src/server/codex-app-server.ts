@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import readline from "node:readline";
 
-import type { AuthSummary, CodexThread } from "../shared/types.js";
+import type { AuthSummary, CodexThread, CodexThreadTokenUsage, CodexTokenUsageBreakdown } from "../shared/types.js";
 import { readCodexExecutionProfileForCwd } from "./project-codex-profile.js";
 
 type JsonRpcSuccess = {
@@ -57,6 +57,68 @@ const DEFAULT_TURN_START = {
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
+function readInteger(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function readTokenUsageBreakdown(value: unknown): CodexTokenUsageBreakdown | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const cachedInputTokens = readInteger(Reflect.get(value, "cachedInputTokens"));
+  const inputTokens = readInteger(Reflect.get(value, "inputTokens"));
+  const outputTokens = readInteger(Reflect.get(value, "outputTokens"));
+  const reasoningOutputTokens = readInteger(Reflect.get(value, "reasoningOutputTokens"));
+  const totalTokens = readInteger(Reflect.get(value, "totalTokens"));
+
+  if (
+    cachedInputTokens === null ||
+    inputTokens === null ||
+    outputTokens === null ||
+    reasoningOutputTokens === null ||
+    totalTokens === null
+  ) {
+    return null;
+  }
+
+  return {
+    cachedInputTokens,
+    inputTokens,
+    outputTokens,
+    reasoningOutputTokens,
+    totalTokens
+  };
+}
+
+function readThreadTokenUsage(params: Record<string, unknown> | undefined): { threadId: string; usage: CodexThreadTokenUsage } | null {
+  const threadId = typeof params?.threadId === "string" ? params.threadId : null;
+  const turnId = typeof params?.turnId === "string" ? params.turnId : null;
+  const tokenUsage = params?.tokenUsage;
+
+  if (!threadId || !turnId || !tokenUsage || typeof tokenUsage !== "object") {
+    return null;
+  }
+
+  const last = readTokenUsageBreakdown(Reflect.get(tokenUsage, "last"));
+  const total = readTokenUsageBreakdown(Reflect.get(tokenUsage, "total"));
+  const modelContextWindow = readInteger(Reflect.get(tokenUsage, "modelContextWindow"));
+
+  if (!last || !total) {
+    return null;
+  }
+
+  return {
+    threadId,
+    usage: {
+      last,
+      total,
+      modelContextWindow,
+      turnId
+    }
+  };
+}
+
 function countCompactionItems(thread: CodexThread): number {
   return thread.turns.reduce(
     (count, turn) => count + turn.items.filter((item) => item.type === "compaction").length,
@@ -86,6 +148,7 @@ export class CodexAppServerClient extends EventEmitter {
   private initializePromise: Promise<void> | null = null;
   private loadedThreads = new Set<string>();
   private liveThreadState = new Map<string, LiveThreadState>();
+  private threadTokenUsage = new Map<string, CodexThreadTokenUsage>();
 
   async getAuthSummary(): Promise<AuthSummary> {
     const response = (await this.request("account/read", {
@@ -343,6 +406,10 @@ export class CodexAppServerClient extends EventEmitter {
     return current;
   }
 
+  getThreadTokenUsage(threadId: string): CodexThreadTokenUsage | null {
+    return this.threadTokenUsage.get(threadId) ?? null;
+  }
+
   private async resumeThread(threadId: string, cwd: string): Promise<void> {
     if (this.loadedThreads.has(threadId)) {
       return;
@@ -450,6 +517,7 @@ export class CodexAppServerClient extends EventEmitter {
         this.initializePromise = null;
         this.loadedThreads.clear();
         this.liveThreadState.clear();
+        this.threadTokenUsage.clear();
       });
 
       this.requestUnsafe("initialize", {
@@ -532,6 +600,14 @@ export class CodexAppServerClient extends EventEmitter {
         if (typeof threadId === "string") {
           this.loadedThreads.delete(threadId);
           this.liveThreadState.delete(threadId);
+          this.threadTokenUsage.delete(threadId);
+        }
+        return;
+      }
+      case "thread/tokenUsage/updated": {
+        const next = readThreadTokenUsage(message.params);
+        if (next) {
+          this.threadTokenUsage.set(next.threadId, next.usage);
         }
         return;
       }

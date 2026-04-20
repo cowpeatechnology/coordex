@@ -259,6 +259,41 @@ The hook script should stay simple.
 
 Recommended algorithm:
 
+- read only a very small set of durable project files
+- derive a compact reminder from those files
+- emit `hookSpecificOutput.additionalContext`
+- write a lightweight local marker so hook invocations are observable without asking the model to self-report
+
+## Recommended observable marker
+
+To avoid guessing whether the hook actually ran, Coordex should maintain a tiny local marker under the project:
+
+- `.coordex/runtime/session-start-last.json`
+- `.coordex/runtime/session-start-events.jsonl`
+
+Recommended marker fields:
+
+- `hookEventName`
+- `detectedAt`
+- `source`
+- `sessionId`
+- `cwd`
+- `roleKey`
+- `model`
+- `transcriptPath`
+
+This marker is for observability only.
+
+It does not change the authority model, and it does not prove that Codex will always rerun `SessionStart` after internal compaction.
+
+What it does provide is:
+
+- a durable record that `SessionStart` fired at least once for a given startup or resume
+- a before-and-after checkpoint that can be inspected around a manual compact test
+- a way to distinguish "the hook did not fire" from "the hook fired but the model still drifted"
+
+If the compact test produces no new marker event, that is evidence that this runtime did not expose a fresh `SessionStart` invocation at that moment.
+
 1. Read `cwd` and identify the active role from the working directory if possible.
 2. Read a small fixed file set in priority order.
 3. Ignore missing files without failing the session.
